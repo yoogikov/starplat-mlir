@@ -56,6 +56,11 @@ def EdgeType : StarPlatDialectType<"Edge", "edge">
   let summary = "Starplat Edge Type";
 }
 
+def StarPlatIntType: StarPlatDialectType<"SPInt", "spint">
+{
+  let summary = "StarPlay Int type";
+}
+
 def PropNodeType : StarPlatDialectType<"PropNode", "propNode">{
   let summary = "Property of Node";
   let parameters = (ins "Type":$parameter, StringRefParameter<"Graph Identifier">:$graphId);
