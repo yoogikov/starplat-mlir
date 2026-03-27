@@ -40,7 +40,7 @@ void StarPlatCodeGen::visitDeclarationStmt(const DeclarationStatement* dclstmt, 
 
     mlir::Type type;
     if (std::string(Type->getType()) == "int")
-        type = builder.getI64Type();
+        type = mlir::starplat::SPIntType::get(builder.getContext());
     auto declareOp = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), type, builder.getStringAttr(Id->getname()),
                                                         builder.getStringAttr("public"));
 
@@ -78,7 +78,7 @@ void StarPlatCodeGen::visitTemplateDeclarationStmt(const TemplateDeclarationStat
         mlir::Type type;
 
         if (std::string(Type->getType()->getType()) == "int")
-            type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
+            type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
         else if (std::string(Type->getType()->getType()) == "bool")
             type = builder.getType<mlir::starplat::PropNodeType>(builder.getI1Type(), graphId);
         else {
@@ -105,7 +105,7 @@ void StarPlatCodeGen::visitTemplateDeclarationStmt(const TemplateDeclarationStat
 
     else if (std::string(Type->getGraphPropNode()->getPropertyType()) == "propEdge") {
 
-        auto type         = builder.getType<mlir::starplat::PropEdgeType>(builder.getI64Type(), graphId);
+        auto type         = builder.getType<mlir::starplat::PropEdgeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
         mlir::Value graph = NULL;
         auto declare      = mlir::starplat::DeclareOp::create(builder, builder.getUnknownLoc(), type, builder.getStringAttr(identifier->getname()),
                                                               builder.getStringAttr("public"), graph);
@@ -1076,14 +1076,14 @@ void StarPlatCodeGen::visitFunction(const Function* function, mlir::SymbolTable*
             llvm::StringRef graphId = arg->getTemplateType()->getGraphName()->getname();
 
             if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propNode") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId));
+                auto type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }
             else if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propEdge") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId));
+                auto type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }
@@ -1220,7 +1220,7 @@ void StarPlatCodeGen::visitInitialiseAssignmentStmt(const InitialiseAssignmentSt
     mlir::Value rhs = NULL;
 
     if (strcmp(type->getType(), "int") == 0)
-        typeAttr = builder.getI64Type();
+        typeAttr = mlir::starplat::SPIntType::get(builder.getContext());
 
     else if (strcmp(type->getType(), "bool") == 0)
         typeAttr = builder.getI1Type();
