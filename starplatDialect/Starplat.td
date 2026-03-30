@@ -366,6 +366,17 @@ def StoreOp : StarplatBaseOp<"store">
                 );
  }
 
+ def IncAndAssignOp : StarplatBaseOp<"incassign">
+ {
+  let summary = "Increase and Assign";
+
+  let arguments = (
+                    ins 
+                    AnyType : $lhs,
+                    AnyType : $rhs
+  );
+ }
+
 
  def endOp : StarplatBaseOp<"end", [Terminator]>
  {

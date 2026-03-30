@@ -691,6 +691,8 @@ void StarPlatCodeGen::visitIncandassignstmt(const Incandassignstmt* stmt, mlir::
         return;
     }
 
+    // this is specifically for var += const;
+
     const Expression* rhsExpr = static_cast<const Expression*>(stmt->getexpr());
     const Number* number = static_cast<const Number*>(rhsExpr->getExpression());
 
@@ -700,11 +702,14 @@ void StarPlatCodeGen::visitIncandassignstmt(const Incandassignstmt* stmt, mlir::
                                                     builder.getStringAttr(std::string("const_") + stmt->getIdentifier()->getname()),
                                                     builder.getStringAttr("public"));
 
-    auto addOp = mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(), intType,
-                                                lhsSymbol, constOp->getResult(0));
+    // auto addOp = mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(), intType,
+    //                                             lhsSymbol, constOp->getResult(0));
 
-    mlir::starplat::AssignmentOp::create(builder, builder.getUnknownLoc(),
-                                          lhsSymbol, addOp->getResult(0));
+    // mlir::starplat::AssignmentOp::create(builder, builder.getUnknownLoc(),
+    //                                       lhsSymbol, addOp->getResult(0));
+
+    mlir::starplat::IncAndAssignOp::create(builder, builder.getUnknownLoc(),
+                                           lhsSymbol, constOp->getResult(0));
 }
 
 void StarPlatCodeGen::visitAssignment(const Assignment* assignment, mlir::SymbolTable* symbolTable) {
