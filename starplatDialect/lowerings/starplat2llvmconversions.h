@@ -3,6 +3,7 @@
 
 #include "includes/StarPlatOps.h"
 #include "includes/StarPlatTypes.h"
+#include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Types.h"
@@ -148,7 +149,7 @@ struct ConvertDeclareOp : public OpConversionPattern<mlir::starplat::DeclareOp2>
     LogicalResult matchAndRewrite(mlir::starplat::DeclareOp2 op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
 
         auto resType = op->getResult(0).getType();
-        if (isa<IntegerType>(resType)) {
+        if (isa<starplat::SPIntType>(resType)) {
             auto loc                   = op->getLoc();
             mlir::MLIRContext* context = getContext();
             auto allocaop = LLVM::AllocaOp::create(rewriter, loc, LLVM::LLVMPointerType::get(context), LLVM::LLVMPointerType::get(context),
@@ -313,7 +314,7 @@ struct ConvertForAllNeighboursOp : public OpConversionPattern<mlir::starplat::Fo
         //
         auto par = op->getParentOp();
         if (isa<scf::ForallOp>(par)) {
-            llvm::errs() << "hi\n";
+            // llvm::errs() << "hi\n";
         }
         auto module                = op->getParentOfType<mlir::ModuleOp>();
         mlir::MLIRContext* context = getContext();
@@ -569,24 +570,87 @@ struct ConvertIsEdgeOp : public OpConversionPattern<mlir::starplat::IsEdgeOp>
     }
 };
 
+struct ConvertIncAndAssign : public OpConversionPattern<mlir::starplat::IncAndAssignOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::IncAndAssignOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc      = op.getLoc();
+        auto operand1 = adaptor.getOperands()[0];
+        // operand1.getType().dump();
+        auto operand2 = adaptor.getOperands()[1];
+
+        // if (isa<LLVM::LLVMPointerType>(operand1.getType())) {
+        //     auto loadOp1 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand1);
+        //     operand1     = loadOp1.getResult();
+        // }
+
+        if (isa<LLVM::LLVMPointerType>(operand2.getType())) {
+            auto loadOp2 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand2);
+            operand2     = loadOp2.getResult();
+        }
+        // operand2.getType().dump();
+
+        auto addOp = LLVM::AtomicRMWOp::create(rewriter, op.getLoc(), LLVM::AtomicBinOp::add, operand1, operand2, LLVM::AtomicOrdering::monotonic);
+        // adaptor.getOperand1();
+        // auto addOp = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), adaptor.getOperands()[0]);
+        //
+        rewriter.replaceOp(op, addOp);
+
+        // rewriter.eraseOp(op);
+        return success();
+    }
+};
+
 struct ConvertAdd : public OpConversionPattern<mlir::starplat::AddOp>
 {
     using OpConversionPattern::OpConversionPattern;
 
     LogicalResult matchAndRewrite(mlir::starplat::AddOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
-        auto loc = op.getLoc();
-        // auto operand1 = op.getOperands()[0];
+        auto loc      = op.getLoc();
+        auto operand1 = adaptor.getOperands()[0];
         // operand1.getType().dump();
-        // auto operand2 = op.getOperands()[1];
+        auto operand2 = adaptor.getOperands()[1];
+
+        if (isa<LLVM::LLVMPointerType>(operand1.getType())) {
+            auto loadOp1 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand1);
+            operand1     = loadOp1.getResult();
+        }
+
+        if (isa<LLVM::LLVMPointerType>(operand2.getType())) {
+            auto loadOp2 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand2);
+            operand2     = loadOp2.getResult();
+        }
         // operand2.getType().dump();
 
-        // auto addOp = LLVM::AddOp::create(rewriter, op.getLoc(), adaptor.getOperands()[0], adaptor.getOperands()[1]);
+        auto addOp = LLVM::AddOp::create(rewriter, op.getLoc(), operand1, operand2);
         // adaptor.getOperand1();
-        // auto addOp = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), op.getOperands()[0]);
+        // auto addOp = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), adaptor.getOperands()[0]);
         //
-        // rewriter.replaceOp(op, addOp);
+        rewriter.replaceOp(op, addOp);
 
         // rewriter.eraseOp(op);
+        return success();
+    }
+};
+
+struct ConvertReturnOp : public OpConversionPattern<mlir::starplat::ReturnOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::ReturnOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+
+        // auto retVal = LLVM::ConstantOp::create(rewriter, op.getLoc(), rewriter.getI32Type(), rewriter.getI32IntegerAttr(0));
+        auto operand = adaptor.getOperands()[0];
+
+        if (isa<LLVM::LLVMPointerType>(operand.getType())) {
+            auto loadOp1 = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), operand);
+            operand      = loadOp1.getResult();
+        }
+        LLVM::ReturnOp::create(rewriter, op.getLoc(), mlir::ValueRange({operand}));
+
+        rewriter.eraseOp(op);
+
         return success();
     }
 };
@@ -644,7 +708,9 @@ struct ConvertStarPlatIRToOMPPass : public mlir::starplat::impl::ConvertStarPlat
         patterns.add<ConvertIfOp>(typeConverter, context);
         patterns.add<ConvertNodeCmpOp>(typeConverter, context);
         patterns.add<ConvertIsEdgeOp>(typeConverter, context);
-        patterns.add<ConvertAdd>(typeConverter, context);
+        patterns.add<ConvertAdd>(context);
+        patterns.add<ConvertIncAndAssign>(context);
+        patterns.add<ConvertReturnOp>(typeConverter, context);
         // patterns.add<ConvertDeclareOp>(typeConverter, context);
 
         // populateFunctionOpInterfaceTypeConversionPattern<mlir::starplat::FuncOp>(patterns, typeConverter);
@@ -656,7 +722,7 @@ struct ConvertStarPlatIRToOMPPass : public mlir::starplat::impl::ConvertStarPlat
 
         //     return isSignatureLegal && isLegal; });
 
-        module->dump();
+        // module->dump();
         if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
             signalPassFailure();
         }
