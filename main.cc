@@ -8,6 +8,7 @@
 // #include "ast/visitor.h"
 #include "astdump.h"
 #include "avial.tab.h"
+#include "mlir/IR/DialectRegistry.h"
 #include "starplatIR.h"
 
 // #include "mlir/IR/Builders.h"
@@ -28,6 +29,8 @@
 // #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 
 #include "lowerings/starplat2llvmconversions.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 
 // #include "lowerings/starplat2omp.h"
 
@@ -67,7 +70,7 @@ int main(int argc, char* argv[]) {
     yyparse();
     fclose(file);
 
-    printf("Parsing Complete\n");
+    // printf("Parsing Complete\n");
 
     // CodeGen* codegen = new CodeGen;
 
@@ -95,7 +98,21 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    starplatcodegen->print();
+    mlir::DialectRegistry registry;
+    mlir::registerBuiltinDialectTranslation(registry);
+    mlir::registerLLVMDialectTranslation(registry); // Register the translation
+    // st.appendDialectRegistry(registry);
+    starplatcodegen->getContext()->appendDialectRegistry(registry);
+    llvm::LLVMContext llvmcontext;
+    auto llvmModule = mlir::translateModuleToLLVMIR(starplatcodegen->getModule()->getOperation(), llvmcontext); // starplatcodegen->print();
+    llvmModule->setTargetTriple(llvm::Triple("x86_64-unknown-linux-gnu"));
+    llvmModule->print(llvm::outs(), nullptr);
+    // module {
+    //   llvm.func @Compute_TC(%arg0: !llvm.ptr) -> i64 {
+    //     %0 = llvm.mlir.constant(0 : i64) : i64
+    //     llvm.return %0 : i64
+    //   }
+    // }
 
     // Work on Conversion of OMP
     // Working on Generating a hello world program in LLVM - Done

@@ -1,20 +1,21 @@
+# function Compute_TC(){
 function Compute_TC(Graph g) {
 int triangle_count=0;
 # triangle_count = triangle_count + 1;
 # triangle_count += 1;
 # triangle_count=0;
-forall(v in g.nodes()) {
+# forall(v in g.nodes()) {
 # int triangle_count;
-  forall(u in g.neighbors(v).filter(u < v)) {
-    forall(w in g.neighbors(v).filter(w > v)) {
-      if (g.is_an_edge(u, w)) {
-        triangle_count += 1;
-      }
-    }
-  }
-}
-  # return triangle_count;
-  return 0;
+  # forall(u in g.neighbors(v).filter(u < v)) {
+#     forall(w in g.neighbors(v).filter(w > v)) {
+#       if (g.is_an_edge(u, w)) {
+#         triangle_count += 1;
+#       }
+#     }
+#   }
+# }
+  return triangle_count;
+  # return ;
 }
 
 # function foo(Graph g, propNode<int,g> dist, propEdge<int,g> weight, Node src)

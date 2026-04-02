@@ -11,8 +11,8 @@
 // #include "mlir/IR/AsmState.h"
 // #include "mlir/IR/BuiltinOps.h"
 // #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Verifier.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Verifier.h"
 // #include "mlir/Parser/Parser.h"
 // #include <string>
 //
@@ -230,7 +230,8 @@ void StarPlatCodeGen::visitTemplateType(const TemplateType* templateType, mlir::
 //                 if (strcmp(methodcallin->getIdentifier()->getname(), "nodes") == 0) {
 //                     loopVarType       = mlir::starplat::NodeType::get(builder.getContext());
 //                     loopVarOp         = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), loopVarType,
-//                                                                         builder.getStringAttr(loopVar->getname()), builder.getStringAttr("public"));
+//                                                                         builder.getStringAttr(loopVar->getname()),
+//                                                                         builder.getStringAttr("public"));
 //                     ops.push_back(loopVarOp);
 //                     symbolTable->insert(loopVarOp);
 //                     // debug
@@ -276,7 +277,8 @@ void StarPlatCodeGen::visitTemplateType(const TemplateType* templateType, mlir::
 
 //                     loopVarType       = mlir::starplat::NodeType::get(builder.getContext());
 //                     loopVarOp         = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), loopVarType,
-//                                                                           builder.getStringAttr(loopVar->getname()), builder.getStringAttr("public"));
+//                                                                           builder.getStringAttr(loopVar->getname()),
+//                                                                           builder.getStringAttr("public"));
 //                     ops.push_back(loopVarOp);
 //                     symbolTable->insert(loopVarOp);
 //                     loopOperands.push_back(loopVarOp->getResult(0));
@@ -306,7 +308,7 @@ void StarPlatCodeGen::visitTemplateType(const TemplateType* templateType, mlir::
 
 //                 if (strcmp(op, "==") == 0)
 //                     loopAttr.push_back(builder.getStringAttr("EQS"));
-//                 else if(strcmp(op, "<") == 0) 
+//                 else if(strcmp(op, "<") == 0)
 //                     loopAttr.push_back(builder.getStringAttr("LT"));
 //                 else if(strcmp(op, ">") == 0)
 //                     loopAttr.push_back(builder.getStringAttr("GT"));
@@ -419,55 +421,55 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     bool isNeighbours = false;
     bool hasFilter    = false;
     mlir::Value graphSymbol;
-    mlir::Value nodeSymbol;   // only for neighbours
+    mlir::Value nodeSymbol; // only for neighbours
     mlir::Value lhsFilterSymbol;
     mlir::Value rhsFilterSymbol;
     std::string filterOp;
 
     // Declare the loop variable
     mlir::Type loopVarType = mlir::starplat::NodeType::get(builder.getContext());
-    auto loopVarOp = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), loopVarType,
-                                                         builder.getStringAttr(loopVar->getname()),
-                                                         builder.getStringAttr("public"));
+    auto loopVarOp = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), loopVarType, builder.getStringAttr(loopVar->getname()),
+                                                        builder.getStringAttr("public"));
     symbolTable->insert(loopVarOp);
     nameToArgMap[loopVar->getname()] = loopVarOp->getResult(0);
 
     // ---- CHAINED: g.neighbors(v).filter(...) ----
     if (memberaccess->getMemberAccessNode()) {
-        const Memberaccess* inner = static_cast<const Memberaccess*>(memberaccess->getMemberAccessNode());
+        const Memberaccess* inner     = static_cast<const Memberaccess*>(memberaccess->getMemberAccessNode());
         const Methodcall* innerMethod = static_cast<const Methodcall*>(inner->getMethodCall());
 
-        graphSymbol = globalLookupOp(inner->getIdentifier()->getname());
+        graphSymbol                   = globalLookupOp(inner->getIdentifier()->getname());
         if (!graphSymbol) {
             llvm::outs() << "Error: Graph not found.\n";
             return;
         }
 
         if (strcmp(innerMethod->getIdentifier()->getname(), "neighbors") == 0) {
-            isNeighbours = true;
+            isNeighbours                = true;
             const Expression* paramExpr = static_cast<const Expression*>(innerMethod->getParamLists());
             const Identifier* paramId   = static_cast<const Identifier*>(paramExpr->getExpression());
-            nodeSymbol = globalLookupOp(paramId->getname());
+            nodeSymbol                  = globalLookupOp(paramId->getname());
             if (!nodeSymbol) {
                 llvm::outs() << "Error: Node '" << paramId->getname() << "' not found.\n";
                 return;
             }
-        } else if (strcmp(innerMethod->getIdentifier()->getname(), "nodes") == 0) {
+        }
+        else if (strcmp(innerMethod->getIdentifier()->getname(), "nodes") == 0) {
             isNeighbours = false;
-        } else {
+        }
+        else {
             llvm::outs() << "Error: Unknown method '" << innerMethod->getIdentifier()->getname() << "'.\n";
             return;
         }
 
         // Check for filter
-        if (outermethodcall && outermethodcall->getIsBuiltin() &&
-            strcmp(outermethodcall->getIdentifier()->getname(), "filter") == 0) {
-            hasFilter = true;
-            const Expression* filterExpr     = static_cast<const Expression*>(outermethodcall->getParamLists());
-            const BoolExpr* boolExpr         = static_cast<const BoolExpr*>(filterExpr->getExpression());
-            const Expression* lhsExpr        = static_cast<const Expression*>(boolExpr->getExpr1());
-            const Expression* rhsExpr        = static_cast<const Expression*>(boolExpr->getExpr2());
-            filterOp                         = std::string(boolExpr->getop());
+        if (outermethodcall && outermethodcall->getIsBuiltin() && strcmp(outermethodcall->getIdentifier()->getname(), "filter") == 0) {
+            hasFilter                    = true;
+            const Expression* filterExpr = static_cast<const Expression*>(outermethodcall->getParamLists());
+            const BoolExpr* boolExpr     = static_cast<const BoolExpr*>(filterExpr->getExpression());
+            const Expression* lhsExpr    = static_cast<const Expression*>(boolExpr->getExpr1());
+            const Expression* rhsExpr    = static_cast<const Expression*>(boolExpr->getExpr2());
+            filterOp                     = std::string(boolExpr->getop());
 
             // Just blindly look up lhs and rhs as expressions
             lhsExpr->Accept(this, symbolTable);
@@ -476,14 +478,15 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
             // For now handle IDENTIFIER op IDENTIFIER and IDENTIFIER op KEYWORD
             if (lhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* lhsId = static_cast<const Identifier*>(lhsExpr->getExpression());
-                lhsFilterSymbol = globalLookupOp(lhsId->getname());
+                lhsFilterSymbol         = globalLookupOp(lhsId->getname());
             }
             if (rhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* rhsId = static_cast<const Identifier*>(rhsExpr->getExpression());
-                rhsFilterSymbol = globalLookupOp(rhsId->getname());
-            } else if (rhsExpr->getKind() == ExpressionKind::KIND_KEYWORD) {
+                rhsFilterSymbol         = globalLookupOp(rhsId->getname());
+            }
+            else if (rhsExpr->getKind() == ExpressionKind::KIND_KEYWORD) {
                 const Keyword* rhsKw = static_cast<const Keyword*>(rhsExpr->getExpression());
-                rhsFilterSymbol = globalLookupOp(rhsKw->getKeyword());
+                rhsFilterSymbol      = globalLookupOp(rhsKw->getKeyword());
                 if (!rhsFilterSymbol)
                     rhsKw->Accept(this, symbolTable);
                 rhsFilterSymbol = globalLookupOp(rhsKw->getKeyword());
@@ -495,7 +498,7 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     else if (memberaccess->getMethodCall()) {
         const Methodcall* method = static_cast<const Methodcall*>(memberaccess->getMethodCall());
 
-        graphSymbol = globalLookupOp(memberaccess->getIdentifier()->getname());
+        graphSymbol              = globalLookupOp(memberaccess->getIdentifier()->getname());
         if (!graphSymbol) {
             llvm::outs() << "Error: Graph not found.\n";
             return;
@@ -503,16 +506,18 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
 
         if (strcmp(method->getIdentifier()->getname(), "nodes") == 0) {
             isNeighbours = false;
-        } else if (strcmp(method->getIdentifier()->getname(), "neighbors") == 0) {
-            isNeighbours = true;
+        }
+        else if (strcmp(method->getIdentifier()->getname(), "neighbors") == 0) {
+            isNeighbours                = true;
             const Expression* paramExpr = static_cast<const Expression*>(method->getParamLists());
             const Identifier* paramId   = static_cast<const Identifier*>(paramExpr->getExpression());
-            nodeSymbol = globalLookupOp(paramId->getname());
+            nodeSymbol                  = globalLookupOp(paramId->getname());
             if (!nodeSymbol) {
                 llvm::outs() << "Error: Node '" << paramId->getname() << "' not found.\n";
                 return;
             }
-        } else {
+        }
+        else {
             llvm::outs() << "Error: Unknown method '" << method->getIdentifier()->getname() << "'.\n";
             return;
         }
@@ -526,18 +531,17 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     mlir::StringAttr loopa = builder.getStringAttr("loopa");
 
     if (!isNeighbours) {
-        loopOp = mlir::starplat::ForAllNodesOp::create(builder, builder.getUnknownLoc(),
-                                                        graphSymbol, loopVarOp->getResult(0), loopa);
-    } else {
-        loopOp = mlir::starplat::ForAllNeighboursOp::create(builder, builder.getUnknownLoc(),
-                                                             graphSymbol, nodeSymbol,
-                                                             loopVarOp->getResult(0), loopa);
+        loopOp = mlir::starplat::ForAllNodesOp::create(builder, builder.getUnknownLoc(), graphSymbol, loopVarOp->getResult(0), loopa);
+    }
+    else {
+        loopOp =
+            mlir::starplat::ForAllNeighboursOp::create(builder, builder.getUnknownLoc(), graphSymbol, nodeSymbol, loopVarOp->getResult(0), loopa);
     }
 
     // ---- Set up the body ----
-    auto& loopBlock = (isNeighbours ?
-        llvm::cast<mlir::starplat::ForAllNeighboursOp>(loopOp).getBody() :
-        llvm::cast<mlir::starplat::ForAllNodesOp>(loopOp).getBody()).emplaceBlock();
+    auto& loopBlock = (isNeighbours ? llvm::cast<mlir::starplat::ForAllNeighboursOp>(loopOp).getBody()
+                                    : llvm::cast<mlir::starplat::ForAllNodesOp>(loopOp).getBody())
+                          .emplaceBlock();
 
     builder.setInsertionPointToStart(&loopBlock);
 
@@ -546,15 +550,11 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
 
     if (hasFilter) {
         // Create NodeCmpOp for the filter condition
-        auto cmpOp = mlir::starplat::NodeCmpOp::create(builder, builder.getUnknownLoc(),
-                                                        mlir::IntegerType::get(builder.getContext(), 1),
-                                                        lhsFilterSymbol, rhsFilterSymbol,
-                                                        builder.getStringAttr(filterOp));
+        auto cmpOp = mlir::starplat::NodeCmpOp::create(builder, builder.getUnknownLoc(), mlir::IntegerType::get(builder.getContext(), 1),
+                                                       lhsFilterSymbol, rhsFilterSymbol, builder.getStringAttr(filterOp));
 
         // Wrap body in StarPlatIfOp
-        auto ifOp = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(),
-                                                  cmpOp->getResult(0),
-                                                  builder.getStringAttr("spif"));
+        auto ifOp     = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), cmpOp->getResult(0), builder.getStringAttr("spif"));
         auto& ifBlock = ifOp.getBody().emplaceBlock();
         builder.setInsertionPointToStart(&ifBlock);
 
@@ -562,15 +562,14 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
 
         mlir::starplat::endOp::create(builder, builder.getUnknownLoc());
         builder.setInsertionPointAfter(ifOp);
-    } else {
+    }
+    else {
         stmtlist->Accept(this, &forAllSymbolTable);
     }
 
     mlir::starplat::endOp::create(builder, builder.getUnknownLoc());
     builder.setInsertionPointAfter(loopOp);
 }
-
-
 
 void StarPlatCodeGen::visitMemberaccessStmt(const MemberacceessStmt* MemberacceessStmt, mlir::SymbolTable* symbolTable) {
     const Memberaccess* memberaccessnode = static_cast<const Memberaccess*>(MemberacceessStmt->getMemberAccess());
@@ -639,38 +638,35 @@ void StarPlatCodeGen::visitMemberaccessStmt(const MemberacceessStmt* Memberaccee
 }
 
 void StarPlatCodeGen::visitIfStmt(const IfStatement* ifStmt, mlir::SymbolTable* symbolTable) {
-    const Expression* condExpr = static_cast<const Expression*>(ifStmt->getexpr());
+    const Expression* condExpr       = static_cast<const Expression*>(ifStmt->getexpr());
     const Memberaccess* memberaccess = static_cast<const Memberaccess*>(condExpr->getExpression());
 
-    auto graphSymbol = globalLookupOp(memberaccess->getIdentifier()->getname());
+    auto graphSymbol                 = globalLookupOp(memberaccess->getIdentifier()->getname());
     if (!graphSymbol) {
         llvm::outs() << "Error: Graph not found in visitIfStmt\n";
         return;
     }
 
     const Methodcall* methodcall = static_cast<const Methodcall*>(memberaccess->getMethodCall());
-    const Paramlist* paramlist = static_cast<const Paramlist*>(methodcall->getParamLists());
-    auto params = paramlist->getParamList();
+    const Paramlist* paramlist   = static_cast<const Paramlist*>(methodcall->getParamLists());
+    auto params                  = paramlist->getParamList();
 
-    const Identifier* id1 = static_cast<const Identifier*>(params[0]->getExpr()->getExpression());
-    const Identifier* id2 = static_cast<const Identifier*>(params[1]->getExpr()->getExpression());
+    const Identifier* id1        = static_cast<const Identifier*>(params[0]->getExpr()->getExpression());
+    const Identifier* id2        = static_cast<const Identifier*>(params[1]->getExpr()->getExpression());
 
-    auto node1Symbol = globalLookupOp(id1->getname());
-    auto node2Symbol = globalLookupOp(id2->getname());
+    auto node1Symbol             = globalLookupOp(id1->getname());
+    auto node2Symbol             = globalLookupOp(id2->getname());
 
     if (!node1Symbol || !node2Symbol) {
         llvm::outs() << "Error: Node symbols not found in visitIfStmt\n";
         return;
     }
 
-    auto isEdgeOp = mlir::starplat::IsEdgeOp::create(builder, builder.getUnknownLoc(),
-                                                      mlir::IntegerType::get(builder.getContext(), 1),
-                                                      graphSymbol, node1Symbol, node2Symbol);
+    auto isEdgeOp = mlir::starplat::IsEdgeOp::create(builder, builder.getUnknownLoc(), mlir::IntegerType::get(builder.getContext(), 1), graphSymbol,
+                                                     node1Symbol, node2Symbol);
 
     // scf.if
-    auto ifOp = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(),
-                                                  isEdgeOp->getResult(0),
-                                                  builder.getStringAttr("spif"));
+    auto ifOp     = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), isEdgeOp->getResult(0), builder.getStringAttr("spif"));
 
     auto& ifBlock = ifOp.getBody().emplaceBlock();
     builder.setInsertionPointToStart(&ifBlock);
@@ -694,13 +690,13 @@ void StarPlatCodeGen::visitIncandassignstmt(const Incandassignstmt* stmt, mlir::
     // this is specifically for var += const;
 
     const Expression* rhsExpr = static_cast<const Expression*>(stmt->getexpr());
-    const Number* number = static_cast<const Number*>(rhsExpr->getExpression());
+    const Number* number      = static_cast<const Number*>(rhsExpr->getExpression());
 
-    mlir::Type intType = mlir::IntegerType::get(builder.getContext(), 64);
-    auto constAttr = mlir::IntegerAttr::get(intType, number->getnumber());
-    auto constOp = mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), intType, constAttr,
-                                                    builder.getStringAttr(std::string("const_") + stmt->getIdentifier()->getname()),
-                                                    builder.getStringAttr("public"));
+    mlir::Type intType        = mlir::IntegerType::get(builder.getContext(), 64);
+    auto constAttr            = mlir::IntegerAttr::get(intType, number->getnumber());
+    auto constOp              = mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), intType, constAttr,
+                                                                builder.getStringAttr(std::string("const_") + stmt->getIdentifier()->getname()),
+                                                                builder.getStringAttr("public"));
 
     // auto addOp = mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(), intType,
     //                                             lhsSymbol, constOp->getResult(0));
@@ -708,8 +704,7 @@ void StarPlatCodeGen::visitIncandassignstmt(const Incandassignstmt* stmt, mlir::
     // mlir::starplat::AssignmentOp::create(builder, builder.getUnknownLoc(),
     //                                       lhsSymbol, addOp->getResult(0));
 
-    mlir::starplat::IncAndAssignOp::create(builder, builder.getUnknownLoc(),
-                                           lhsSymbol, constOp->getResult(0));
+    mlir::starplat::IncAndAssignOp::create(builder, builder.getUnknownLoc(), lhsSymbol, constOp->getResult(0));
 }
 
 void StarPlatCodeGen::visitAssignment(const Assignment* assignment, mlir::SymbolTable* symbolTable) {
@@ -747,31 +742,30 @@ void StarPlatCodeGen::visitIdentifier(const Identifier* identifier, mlir::Symbol
 void StarPlatCodeGen::visitReturnStmt(const ReturnStmt* returnStmt, mlir::SymbolTable* symbolTable) {
     const Expression* expr = static_cast<const Expression*>(returnStmt->getexpr());
 
-    if(expr->getKind() == KIND_NUMBER) {
+    if (expr->getKind() == KIND_NUMBER) {
         const Number* number = static_cast<const Number*>(expr->getExpression());
-        mlir::Type intType = mlir::IntegerType::get(builder.getContext(), 64);
-        auto constAttr = mlir::IntegerAttr::get(intType, number->getnumber());
-        int const_count = get_const_count();
-        auto constOp = mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), intType, constAttr,
-                                                        builder.getStringAttr(std::string("const_") + to_string(const_count)),
-                                                        builder.getStringAttr("public"));
+        mlir::Type intType   = mlir::IntegerType::get(builder.getContext(), 64);
+        auto constAttr       = mlir::IntegerAttr::get(intType, number->getnumber());
+        int const_count      = get_const_count();
+        auto constOp =
+            mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), intType, constAttr,
+                                            builder.getStringAttr(std::string("const_") + to_string(const_count)), builder.getStringAttr("public"));
         auto retSymbol = constOp->getResult(0);
         mlir::starplat::ReturnOp::create(builder, builder.getUnknownLoc(), mlir::ValueRange{retSymbol});
     }
 
-    else if(expr->getKind() == KIND_IDENTIFIER) {
+    else if (expr->getKind() == KIND_IDENTIFIER) {
         const Identifier* identifier = static_cast<const Identifier*>(expr->getExpression());
-        
-        auto retSymbol = globalLookupOp(identifier->getname());
+
+        auto retSymbol               = globalLookupOp(identifier->getname());
         if (!retSymbol) {
             llvm::outs() << "Error: Return value '" << identifier->getname() << "' not found.\n";
             mlir::starplat::ReturnOp::create(builder, builder.getUnknownLoc(), mlir::ValueRange{});
             return;
         }
-    
+
         mlir::starplat::ReturnOp::create(builder, builder.getUnknownLoc(), mlir::ValueRange{retSymbol});
     }
-
 }
 void StarPlatCodeGen::visitParameterAssignment(const ParameterAssignment* paramAssignment, mlir::SymbolTable* symbolTable) {
     Identifier* identifier = static_cast<Identifier*>(paramAssignment->getidentifier());
@@ -1097,7 +1091,9 @@ void StarPlatCodeGen::visitFunction(const Function* function, mlir::SymbolTable*
         argNames.push_back(builder.getStringAttr(arg->getVarName()->getname()));
     }
 
-    auto funcType                = builder.getFunctionType(argTypes, {});
+    // auto ret = function->
+
+    auto funcType                = builder.getFunctionType(argTypes, {builder.getI64Type()});
     mlir::ArrayAttr argNamesAttr = builder.getArrayAttr(argNames);
 
     auto func = mlir::starplat::FuncOp::create(builder, builder.getUnknownLoc(), function->getfuncNameIdentifier(), funcType, argNamesAttr);
@@ -1429,7 +1425,7 @@ mlir::MLIRContext* StarPlatCodeGen::getContext() { return &context; }
 mlir::ModuleOp* StarPlatCodeGen::getModule() { return &module; }
 
 mlir::Value StarPlatCodeGen::globalLookupOp(llvm::StringRef name) {
-    llvm::outs() << "Looking up: " << name << " in " << symbolTables.size() << " symbol tables\n";
+    // llvm::outs() << "Looking up: " << name << " in " << symbolTables.size() << " symbol tables\n";
     auto it = nameToArgMap.find(name);
     if (it != nameToArgMap.end()) {
         mlir::Value value = it->second;
