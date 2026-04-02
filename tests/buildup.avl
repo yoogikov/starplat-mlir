@@ -13,8 +13,8 @@ forall(v in g.nodes()) {
     }
   }
 }
-  return triangle_count;
-  # return 0;
+  # return triangle_count;
+  return 0;
 }
 
 # function foo(Graph g, propNode<int,g> dist, propEdge<int,g> weight, Node src)
