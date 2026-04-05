@@ -23,12 +23,13 @@
 
 // #include "starplatDialect/includes/StarPlatDialect.h"
 
-// #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
-// #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
-// #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
-// #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
-
 #include "lowerings/starplat2llvmconversions.h"
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
+#include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 
@@ -91,12 +92,21 @@ int main(int argc, char* argv[]) {
 
     PassManager pm(starplatcodegen->getContext());
     pm.addPass(mlir::starplat::createConvertStarPlatIRToOMPPass());
+    pm.addPass(mlir::createSCFToControlFlowPass());
+    pm.addPass(mlir::createArithToLLVMConversionPass());
+    pm.addPass(mlir::createConvertIndexToLLVMPass());
+    pm.addPass(mlir::createConvertControlFlowToLLVMPass());
+    pm.addPass(mlir::createConvertFuncToLLVMPass());
+    pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
+    pm.addPass(mlir::createReconcileUnrealizedCastsPass());
 
     // // RUN the pass on the module
     if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
         llvm::errs() << "StarPlat → OMP lowering failed\n";
         return 0;
     }
+
+    // starplatcodegen->print();
 
     mlir::DialectRegistry registry;
     mlir::registerBuiltinDialectTranslation(registry);
@@ -107,6 +117,7 @@ int main(int argc, char* argv[]) {
     auto llvmModule = mlir::translateModuleToLLVMIR(starplatcodegen->getModule()->getOperation(), llvmcontext); // starplatcodegen->print();
     llvmModule->setTargetTriple(llvm::Triple("x86_64-unknown-linux-gnu"));
     llvmModule->print(llvm::outs(), nullptr);
+
     // module {
     //   llvm.func @Compute_TC(%arg0: !llvm.ptr) -> i64 {
     //     %0 = llvm.mlir.constant(0 : i64) : i64
