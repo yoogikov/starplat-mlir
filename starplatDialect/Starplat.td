@@ -310,6 +310,17 @@ def NodeCmpOp : StarplatBaseOp<"nodecmp">
     let results = (outs I1:$result);
 }
 
+def CmpOp : StarplatBaseOp<"cmp">
+{
+    let summary = "Compare values";
+    let arguments = (ins
+        AnyType:$lhs,
+        AnyType:$rhs,
+        Builtin_StringAttr:$op
+    );
+    let results = (outs I1:$result);
+}
+
  def GetEdgeOp : StarplatBaseOp<"getedge">
  {
     let summary = "Return Edge between node1 and node 2";
@@ -332,23 +343,20 @@ def StoreOp : StarplatBaseOp<"store">
 }
 
 
- def MinOp : StarplatBaseOp<"min">
- {
+def MinOp : StarplatBaseOp<"min">
+{
     let summary = "Min Operation of starplat";
-
     let arguments = ( ins 
-                      AnyType : $lhs1,
-                      AnyType : $lhs2,
-                      AnyType : $rhs1,
-                      AnyType : $rhs2,
-                      AnyType : $updateValue
+                      AnyType : $lhsNode1,
+                      AnyType : $lhsProp1,
+                      AnyType : $lhsNode2,
+                      AnyType : $lhsProp2,
+                      AnyType : $rhsValue1, 
+                      AnyType : $rhsValue2, 
+                      AnyType : $updateValue 
     );
-
-    let results = ( outs
-                    AnyType : $result1 
-    );
-
- }
+    let results = ( outs );  // no result, this is a write op
+}
 
 
  def AddOp : StarplatBaseOp<"add">
