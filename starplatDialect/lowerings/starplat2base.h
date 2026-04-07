@@ -1,5 +1,5 @@
-#ifndef STARPLAT2OMP
-#define STARPLAT2OMP
+#ifndef STARPLAT2BASE
+#define STARPLAT2BASE
 
 #include "includes/StarPlatOps.h"
 #include "includes/StarPlatTypes.h"
@@ -666,12 +666,12 @@ namespace mlir
 {
 namespace starplat
 {
-#define GEN_PASS_DEF_CONVERTSTARPLATIRTOOMPPASS
+#define GEN_PASS_DEF_CONVERTSTARPLATIRTOBASEPASS
 #include "Passes.h.inc"
 
-struct ConvertStarPlatIRToOMPPass : public mlir::starplat::impl::ConvertStarPlatIRToOMPPassBase<ConvertStarPlatIRToOMPPass>
+struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPlatIRToBasePassBase<ConvertStarPlatIRToBasePass>
 {
-    using ConvertStarPlatIRToOMPPassBase::ConvertStarPlatIRToOMPPassBase;
+    using ConvertStarPlatIRToBasePassBase::ConvertStarPlatIRToBasePassBase;
 
     void runOnOperation() override {
 

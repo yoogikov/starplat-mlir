@@ -439,11 +439,21 @@ def VertexToEdge : Pass<"vertex-to-edge", "mlir::ModuleOp"> {
     let dependentDialects = ["mlir::starplat::StarPlatDialect"];
 }
 
-def ConvertStarPlatIRToOMPPass : Pass<"starplatir-to-omp">{
-  let summary = "StarPlat IR to OMP";
+def ConvertStarPlatIRToBasePass : Pass<"starplatir-to-base">{
+  let summary = "StarPlat IR to base";
 
   let dependentDialects = ["mlir::starplat::StarPlatDialect", "::mlir::omp::OpenMPDialect", "mlir::func::FuncDialect",
-  "::mlir::scf::SCFDialect", "::mlir::memref::MemRefDialect", "mlir::arith::ArithDialect"];
+  "::mlir::scf::SCFDialect", "::mlir::memref::MemRefDialect", "mlir::arith::ArithDialect", "mlir::LLVM::LLVMDialect"];
+
+
+}
+
+def ConvertBaseToOMPPass : Pass<"base-to-omp">{
+  let summary = "Base to OMP";
+
+  let dependentDialects = ["mlir::starplat::StarPlatDialect", "::mlir::omp::OpenMPDialect", "mlir::func::FuncDialect",
+  "::mlir::scf::SCFDialect", "::mlir::memref::MemRefDialect", "mlir::arith::ArithDialect", "mlir::LLVM::LLVMDialect"];
+
 
 }
 
