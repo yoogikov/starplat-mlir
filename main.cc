@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
 
     PassManager pm(starplatcodegen->getContext());
     pm.addPass(mlir::starplat::createConvertStarPlatIRToBasePass());
-    pm.addPass(mlir::starplat::createConvertBaseToOMPPass());
+    // pm.addPass(mlir::starplat::createConvertBaseToOMPPass());
     // pm.addPass(mlir::createSCFToControlFlowPass());
     // pm.addPass(mlir::createArithToLLVMConversionPass());
     // pm.addPass(mlir::createConvertIndexToLLVMPass());
