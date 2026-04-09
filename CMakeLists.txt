@@ -88,11 +88,18 @@ target_link_libraries(app
           MLIRParser
           MLIRPass
           MLIRTranslateLib
+	  MLIROpenMPToLLVM
           MLIRSupport
           MLIRSideEffectInterfaces
           MLIRTransforms)
 add_custom_target(test
     COMMAND ${CMAKE_SOURCE_DIR}/run.sh ${CMAKE_SOURCE_DIR}/tests/buildup.avl
+    DEPENDS app
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running run.sh with tests/buildup.avl"
+)
+add_custom_target(test_full
+    COMMAND ${CMAKE_SOURCE_DIR}/run_full.sh ${CMAKE_SOURCE_DIR}/tests/buildup.avl
     DEPENDS app
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running run.sh with tests/buildup.avl"
