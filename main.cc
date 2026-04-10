@@ -95,39 +95,39 @@ int main(int argc, char* argv[]) {
         exit(0);
     }
 
-    // starplatcodegen->print();
+    starplatcodegen->print();
 
-    PassManager pm(starplatcodegen->getContext());
-    pm.addPass(mlir::starplat::createConvertStarPlatIRToBasePass());
-    if (target == OMP)
-        pm.addPass(createConvertSCFToOpenMPPass());
-    pm.addPass(mlir::createSCFToControlFlowPass());
-    pm.addPass(mlir::createArithToLLVMConversionPass());
-    pm.addPass(mlir::createConvertIndexToLLVMPass());
-    pm.addPass(mlir::createConvertControlFlowToLLVMPass());
-    pm.addPass(mlir::createConvertFuncToLLVMPass());
-    pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
-    pm.addPass(mlir::createConvertOpenMPToLLVMPass());
-    pm.addPass(mlir::createReconcileUnrealizedCastsPass());
-
-    // // RUN the pass on the module
-    if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
-        llvm::errs() << "StarPlat → Base lowering failed\n";
-        return 0;
-    }
+    // PassManager pm(starplatcodegen->getContext());
+    // pm.addPass(mlir::starplat::createConvertStarPlatIRToBasePass());
+    // if (target == OMP)
+    //     pm.addPass(createConvertSCFToOpenMPPass());
+    // pm.addPass(mlir::createSCFToControlFlowPass());
+    // pm.addPass(mlir::createArithToLLVMConversionPass());
+    // pm.addPass(mlir::createConvertIndexToLLVMPass());
+    // pm.addPass(mlir::createConvertControlFlowToLLVMPass());
+    // pm.addPass(mlir::createConvertFuncToLLVMPass());
+    // pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
+    // pm.addPass(mlir::createConvertOpenMPToLLVMPass());
+    // pm.addPass(mlir::createReconcileUnrealizedCastsPass());
+    //
+    // // // RUN the pass on the module
+    // if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
+    //     llvm::errs() << "StarPlat → Base lowering failed\n";
+    //     return 0;
+    // }
 
     // starplatcodegen->print();
     //
-    mlir::DialectRegistry registry;
-    mlir::registerBuiltinDialectTranslation(registry);
-    mlir::registerOpenMPDialectTranslation(registry);
-    mlir::registerLLVMDialectTranslation(registry); // Register the translation
-    // st.appendDialectRegistry(registry);
-    starplatcodegen->getContext()->appendDialectRegistry(registry);
-    llvm::LLVMContext llvmcontext;
-    auto llvmModule = mlir::translateModuleToLLVMIR(starplatcodegen->getModule()->getOperation(), llvmcontext); // starplatcodegen->print();
-    llvmModule->setTargetTriple(llvm::Triple("x86_64-unknown-linux-gnu"));
-    llvmModule->print(llvm::outs(), nullptr);
+    // mlir::DialectRegistry registry;
+    // mlir::registerBuiltinDialectTranslation(registry);
+    // mlir::registerOpenMPDialectTranslation(registry);
+    // mlir::registerLLVMDialectTranslation(registry); // Register the translation
+    // // st.appendDialectRegistry(registry);
+    // starplatcodegen->getContext()->appendDialectRegistry(registry);
+    // llvm::LLVMContext llvmcontext;
+    // auto llvmModule = mlir::translateModuleToLLVMIR(starplatcodegen->getModule()->getOperation(), llvmcontext); // starplatcodegen->print();
+    // llvmModule->setTargetTriple(llvm::Triple("x86_64-unknown-linux-gnu"));
+    // llvmModule->print(llvm::outs(), nullptr);
     //
     //
     // module {
