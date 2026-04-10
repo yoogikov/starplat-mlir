@@ -306,6 +306,26 @@ class ForallStatement : public ASTNode
     ASTNode* stmtlist_;
 };
 
+
+class DoWhileStatement : public ASTNode
+{
+  public:
+    DoWhileStatement(ASTNode* expr, ASTNode* stmtlist);
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~DoWhileStatement();
+    
+    ASTNode* getexpr() const;
+    ASTNode* getstmtlist() const;
+
+  private:
+    ASTNode* expr_;
+    ASTNode* stmtlist_;
+};
+
 class IfStatement : public ASTNode
 {
   public:

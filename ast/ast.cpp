@@ -190,6 +190,17 @@ ASTNode* ForallStatement::getstmtlist() const { return stmtlist_; }
 void ForallStatement::Accept(Visitor* visitor) const { visitor->visitForallStmt(this); }
 void ForallStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitForallStmt(this, symbolTable); }
 
+// DoWhileStatment
+DoWhileStatement::DoWhileStatement(ASTNode* expr, ASTNode* stmtlist) : expr_(expr), stmtlist_(stmtlist) {}
+DoWhileStatement::~DoWhileStatement() {
+    delete expr_;
+    delete stmtlist_;
+}
+ASTNode* DoWhileStatement::getexpr() const { return expr_; }
+ASTNode* DoWhileStatement::getstmtlist() const { return stmtlist_; }
+void DoWhileStatement::Accept(Visitor* visitor) const { visitor->visitDoWhileStmt(this); }
+void DoWhileStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitDoWhileStmt(this, symbolTable); }
+
 // IfStatement
 IfStatement::IfStatement(ASTNode* expr, ASTNode* stmt) : expr(expr), stmt(stmt) {}
 IfStatement::IfStatement() {}

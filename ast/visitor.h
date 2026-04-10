@@ -35,6 +35,7 @@ class Expression;
 class Methodcall;
 class Memberaccess;
 class MemberacceessStmt;
+class DoWhileStatement;
 
 
 class Visitor
@@ -45,6 +46,7 @@ class Visitor
         virtual void visitDeclarationStmt(const DeclarationStatement *declStmt) = 0;
         virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement *templatedeclStmt) = 0;
         virtual void visitForallStmt(const ForallStatement *forAllStmt) = 0;
+        virtual void visitDoWhileStmt(const DoWhileStatement* doWhileStmt) = 0;
         virtual void visitIfStmt(const IfStatement *ifStmt) = 0;
         virtual void visitBoolExpr(const BoolExpr *boolExpr) = 0;
         virtual void visitIncandassignstmt(const Incandassignstmt *incandassignstmt) = 0;
@@ -85,6 +87,7 @@ class MLIRVisitor
         virtual void visitDeclarationStmt(const DeclarationStatement *declStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement *templatedeclStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitForallStmt(const ForallStatement *forAllStmt, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitDoWhileStmt(const DoWhileStatement *doWhileStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIfStmt(const IfStatement *ifStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitBoolExpr(const BoolExpr *boolExpr, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIncandassignstmt(const Incandassignstmt *incandassignstmt, mlir::SymbolTable *symbolTable) = 0;

@@ -41,6 +41,8 @@ void StarPlatCodeGen::visitDeclarationStmt(const DeclarationStatement* dclstmt, 
     mlir::Type type;
     if (std::string(Type->getType()) == "int")
         type = mlir::starplat::SPIntType::get(builder.getContext());
+    if (std::string(Type->getType()) == "float")
+        type = mlir::starplat::SPFloatType::get(builder.getContext());
     auto declareOp = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), type, builder.getStringAttr(Id->getname()),
                                                         builder.getStringAttr("public"));
 
@@ -613,7 +615,9 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     builder.setInsertionPointAfter(loopOp);
 }
 
+void StarPlatCodeGen::visitDoWhileStmt(const DoWhileStatement* doWhileStmt, mlir::SymbolTable* symbolTable) {
 
+}
 
 void StarPlatCodeGen::visitMemberaccessStmt(const MemberacceessStmt* MemberacceessStmt, mlir::SymbolTable* symbolTable) {
     const Memberaccess* memberaccessnode = static_cast<const Memberaccess*>(MemberacceessStmt->getMemberAccess());

@@ -18,10 +18,10 @@
 
 
 %token<id> FUNCTION LPAREN RPAREN LCURLY RCURLY RETURN IDENTIFIER ASGN NUMBER LTxx GT FORALL FOR EQUALS EDGE NODE
-%token<id> INT IF SEMICLN DOT IN COMMA EQUAL GRAPH PLUSEQUAL PROPNODE PROPEDGE FALSE INF FIXEDPOINT UNTIL COLON PLUS TRUE NOT BOOL
+%token<id> INT IF SEMICLN DOT IN COMMA EQUAL GRAPH PLUSEQUAL PROPNODE PROPEDGE FALSE INF FIXEDPOINT UNTIL COLON PLUS TRUE NOT BOOL FLOAT DO WHILE
 
 %type<astNode>  methodcall memberaccess expr type paramlist arglist arg function boolexpr declarationstmt stmt 
-stmtlist ifstmt forstmt returnstmt forallstmt incandassignstmt assignment initializestmt fixedPointStmt tuppleAssignmentstmt memberaccessstmt assignmentStmt
+stmtlist ifstmt forstmt returnstmt forallstmt dowhileStmt incandassignstmt assignment initializestmt fixedPointStmt tuppleAssignmentstmt memberaccessstmt assignmentStmt
 addExpr properties templateType templateDecl paramAssignment param memberaccessAssignment KEYWORDS 
 
 
@@ -64,6 +64,7 @@ stmt :  assignmentStmt                              {$$ = $1;}
         |   memberaccessAssignment                      {$$ = $1;}
         |   fixedPointStmt                              {$$ = $1;}
         |   tuppleAssignmentstmt                        {$$ = $1;}
+        |   dowhileStmt                                 {$$ = $1;}
         ;
 
 
@@ -116,6 +117,8 @@ fixedPointStmt : FIXEDPOINT UNTIL LPAREN IDENTIFIER COLON expr RPAREN LCURLY stm
                                                                                                         }
 
 tuppleAssignmentstmt : LTxx expr COMMA expr GT EQUAL LTxx expr COMMA expr GT SEMICLN               {$$ = new TupleAssignment($2, $4, $8, $10);}
+
+dowhileStmt : DO LCURLY stmtlist RCURLY WHILE LPAREN boolexpr RPAREN SEMICLN               {$$ = new DoWhileStatement($7, $3);}
 
 boolexpr : expr LTxx expr 		{$$ = new BoolExpr($1, strdup("<"), $3);}
 
@@ -279,9 +282,9 @@ properties : PROPEDGE                   {$$ = new GraphProperties($1);}
 type : INT              {       
                                 $$ = new TypeExpr($1);
                         }
-      | BOOL             {
-                                  $$ = new TypeExpr($1);
-                         }
+      | BOOL            {
+                                $$ = new TypeExpr($1);
+                        }
 
      | GRAPH            {
                                 $$ = new TypeExpr($1);
@@ -291,6 +294,9 @@ type : INT              {
                                 $$ = new TypeExpr($1);
                         }
      |  NODE            {
+                                $$ = new TypeExpr($1);
+                        }
+     | FLOAT            {
                                 $$ = new TypeExpr($1);
                         }
      ;

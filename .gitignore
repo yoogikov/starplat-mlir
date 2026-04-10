@@ -13,3 +13,4 @@ tags
 workspace/*
 todiscuss
 StarPlatIR.docs
+tests/my_test.avl

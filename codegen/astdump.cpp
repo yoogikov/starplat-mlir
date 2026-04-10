@@ -94,6 +94,36 @@ void CodeGen::visitForallStmt(const ForallStatement* forAllStmt) {
     cout << "}\n";
 }
 
+void CodeGen::visitDoWhileStmt(const DoWhileStatement* doWhileStmt) {
+    beautifier.print_tab();
+    std::cout << "DoWhile: {\n";
+    ++beautifier;
+
+    beautifier.print_tab();
+    std::cout << "Loop Expr: {\n";
+    ++beautifier;
+
+    doWhileStmt->getexpr()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    beautifier.print_tab();
+    std::cout << "Loop Body: {\n";
+    ++beautifier;
+
+    doWhileStmt->getstmtlist()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
 void CodeGen::visitIfStmt(const IfStatement* ifStmt) {
     beautifier.print_tab();
     std::cout << "If Statement: {\n";
@@ -107,7 +137,20 @@ void CodeGen::visitIfStmt(const IfStatement* ifStmt) {
     std::cout << "}\n";
 }
 
-void CodeGen::visitBoolExpr(const BoolExpr* boolExpr) { std::cout << "Visit Bool Statement\n"; }
+void CodeGen::visitBoolExpr(const BoolExpr* boolExpr) { 
+    beautifier.print_tab();
+    std::cout << "Bool Expression {\n";
+    ++beautifier;
+
+    boolExpr->getExpr1()->Accept(this);
+    beautifier.print_tab();
+    std::cout << "Operator: " << boolExpr->getop() << "\n";
+    boolExpr->getExpr2()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+}
 
 void CodeGen::visitIncandassignstmt(const Incandassignstmt* incandassignstmt) {
     beautifier.print_tab();
@@ -306,12 +349,12 @@ void CodeGen::visitStatementlist(const Statementlist* stmtlist) {
 
 void CodeGen::visitType(const TypeExpr* type) { 
     beautifier.print_tab();
-    cout << "type: " << type->getType() << "\n"; 
+    cout << "Type: " << type->getType() << "\n"; 
 }
 
 void CodeGen::visitNumber(const Number* number) { 
     beautifier.print_tab();
-    cout << "number: " << number->getnumber() << "\n"; 
+    cout << "Number: " << number->getnumber() << "\n"; 
 }
 
 void CodeGen::visitExpression(const Expression* expr) {
