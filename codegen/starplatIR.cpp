@@ -80,7 +80,7 @@ void StarPlatCodeGen::visitTemplateDeclarationStmt(const TemplateDeclarationStat
         mlir::Type type;
 
         if (std::string(Type->getType()->getType()) == "int")
-            type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+            type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
         else if (std::string(Type->getType()->getType()) == "bool")
             type = builder.getType<mlir::starplat::PropNodeType>(builder.getI1Type(), graphId);
         else {
@@ -107,7 +107,7 @@ void StarPlatCodeGen::visitTemplateDeclarationStmt(const TemplateDeclarationStat
 
     else if (std::string(Type->getGraphPropNode()->getPropertyType()) == "propEdge") {
 
-        auto type         = builder.getType<mlir::starplat::PropEdgeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+        auto type         = builder.getType<mlir::starplat::PropEdgeType>(builder.getI64Type(), graphId);
         mlir::Value graph = NULL;
         auto declare      = mlir::starplat::DeclareOp::create(builder, builder.getUnknownLoc(), type, builder.getStringAttr(identifier->getname()),
                                                               builder.getStringAttr("public"), graph);
@@ -416,27 +416,23 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     const Memberaccess* memberaccess  = static_cast<const Memberaccess*>(expr->getExpression());
     const Methodcall* outermethodcall = static_cast<const Methodcall*>(memberaccess->getMethodCall());
 
-    bool isNeighbours = false;
-    bool hasFilter    = false;
+    bool isNeighbours  = false;
+    bool hasFilter     = false;
+    bool lhsIsLoopVar  = false;
     mlir::Value graphSymbol;
     mlir::Value nodeSymbol;
     mlir::Value rhsFilterSymbol;
-    std::string filterOp;
-
-    // Store raw ingredients for filter LHS — emitted inside loop body later
-    ExpressionKind lhsExprKind = ExpressionKind::KIND_IDENTIFIER; // default
+    mlir::Value lhsFilterSymbol;
     mlir::Value lhsNodeVal;
     mlir::Value lhsPropVal;
+    std::string filterOp;
     std::string lhsPropName;
-    mlir::Value lhsFilterSymbol; // used if plain identifier
+    ExpressionKind lhsExprKind = ExpressionKind::KIND_IDENTIFIER;
 
-    // Declare the loop variable
-    mlir::Type loopVarType = mlir::starplat::NodeType::get(builder.getContext());
-    auto loopVarOp = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), loopVarType,
-                                                         builder.getStringAttr(loopVar->getname()),
-                                                         builder.getStringAttr("public"));
-    symbolTable->insert(loopVarOp);
-    nameToArgMap[loopVar->getname()] = loopVarOp->getResult(0);
+    mlir::Type nodeType = mlir::starplat::NodeType::get(builder.getContext());
+
+    // Pre-register loop var as null so filter parsing can find it by name
+    nameToArgMap[loopVar->getname()] = mlir::Value();
 
     // ---- CHAINED: g.nodes().filter(...) or g.neighbors(v).filter(...) ----
     if (memberaccess->getMemberAccessNode()) {
@@ -465,7 +461,7 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
             return;
         }
 
-        // Check for filter — only parse/store, do NOT emit ops yet
+        // Check for filter
         if (outermethodcall && outermethodcall->getIsBuiltin() &&
             strcmp(outermethodcall->getIdentifier()->getname(), "filter") == 0) {
             hasFilter = true;
@@ -474,10 +470,9 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
             const Expression* lhsExpr    = static_cast<const Expression*>(boolExpr->getExpr1());
             const Expression* rhsExpr    = static_cast<const Expression*>(boolExpr->getExpr2());
             filterOp                     = std::string(boolExpr->getop());
+            lhsExprKind                  = lhsExpr->getKind();
 
-            lhsExprKind = lhsExpr->getKind();
-
-            // LHS: store ingredients, don't emit
+            // LHS
             if (lhsExpr->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
                 const Memberaccess* lhsMem = static_cast<const Memberaccess*>(lhsExpr->getExpression());
                 const Identifier* nodeId   = static_cast<const Identifier*>(lhsMem->getIdentifier());
@@ -486,26 +481,39 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
                     llvm::outs() << "Error: Malformed member access in filter.\n";
                     return;
                 }
-                lhsNodeVal  = globalLookupOp(nodeId->getname());
-                lhsPropVal  = globalLookupOp(propId->getname());
                 lhsPropName = propId->getname();
-                if (!lhsNodeVal || !lhsPropVal) {
-                    llvm::outs() << "Error: Undefined node or property in filter.\n";
+                lhsPropVal  = globalLookupOp(propId->getname());
+                if (!lhsPropVal) {
+                    llvm::outs() << "Error: Undefined property '" << propId->getname() << "' in filter.\n";
                     return;
+                }
+                // Check if node is the loop var
+                if (strcmp(nodeId->getname(), loopVar->getname()) == 0) {
+                    lhsIsLoopVar = true; // node val filled after block creation
+                } else {
+                    lhsNodeVal = globalLookupOp(nodeId->getname());
+                    if (!lhsNodeVal) {
+                        llvm::outs() << "Error: Undefined node '" << nodeId->getname() << "' in filter.\n";
+                        return;
+                    }
                 }
             } else if (lhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* lhsId = static_cast<const Identifier*>(lhsExpr->getExpression());
-                lhsFilterSymbol = globalLookupOp(lhsId->getname());
-                if (!lhsFilterSymbol) {
-                    llvm::outs() << "Error: Undefined identifier '" << lhsId->getname() << "' in filter.\n";
-                    return;
+                if (strcmp(lhsId->getname(), loopVar->getname()) == 0) {
+                    lhsIsLoopVar = true; // filled after block creation
+                } else {
+                    lhsFilterSymbol = globalLookupOp(lhsId->getname());
+                    if (!lhsFilterSymbol) {
+                        llvm::outs() << "Error: Undefined identifier '" << lhsId->getname() << "' in filter.\n";
+                        return;
+                    }
                 }
             } else {
                 llvm::outs() << "Error: Unsupported filter LHS expression.\n";
                 return;
             }
 
-            // RHS: constants are fine to resolve now
+            // RHS
             if (rhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* rhsId = static_cast<const Identifier*>(rhsExpr->getExpression());
                 rhsFilterSymbol = globalLookupOp(rhsId->getname());
@@ -564,11 +572,10 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
 
     if (!isNeighbours) {
         loopOp = mlir::starplat::ForAllNodesOp::create(builder, builder.getUnknownLoc(),
-                                                        graphSymbol, loopVarOp->getResult(0), loopa);
+                                                        graphSymbol, loopa);
     } else {
         loopOp = mlir::starplat::ForAllNeighboursOp::create(builder, builder.getUnknownLoc(),
-                                                             graphSymbol, nodeSymbol,
-                                                             loopVarOp->getResult(0), loopa);
+                                                             graphSymbol, nodeSymbol, loopa);
     }
 
     // ---- Set up the body ----
@@ -576,21 +583,29 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
         llvm::cast<mlir::starplat::ForAllNeighboursOp>(loopOp).getBody() :
         llvm::cast<mlir::starplat::ForAllNodesOp>(loopOp).getBody()).emplaceBlock();
 
+    // Add loop var as block argument and overwrite the null placeholder
+    loopBlock.addArgument(nodeType, builder.getUnknownLoc());
+    nameToArgMap[loopVar->getname()] = loopBlock.getArgument(0);
+
     builder.setInsertionPointToStart(&loopBlock);
 
     mlir::SymbolTable forAllSymbolTable(loopOp);
     symbolTables.push_back(&forAllSymbolTable);
 
     if (hasFilter) {
-        // NOW inside the loop body — emit GetNodePropertyOp for v.modified etc.
+        // Resolve filter LHS now that block arg exists
         if (lhsExprKind == ExpressionKind::KIND_MEMBERACCESS) {
+            // node is either loop var (now a block arg) or a regular value
+            mlir::Value nodeVal = lhsIsLoopVar ? loopBlock.getArgument(0) : lhsNodeVal;
             auto getProp = mlir::starplat::GetNodePropertyOp::create(
                 builder, builder.getUnknownLoc(), builder.getI64Type(),
-                lhsNodeVal, lhsPropVal,
+                nodeVal, lhsPropVal,
                 builder.getStringAttr(lhsPropName));
             lhsFilterSymbol = getProp->getResult(0);
+        } else if (lhsIsLoopVar) {
+            // plain identifier that is the loop var
+            lhsFilterSymbol = loopBlock.getArgument(0);
         }
-        // if KIND_IDENTIFIER, lhsFilterSymbol is already set above
 
         auto cmpOp = mlir::starplat::CmpOp::create(builder, builder.getUnknownLoc(),
                                                     mlir::IntegerType::get(builder.getContext(), 1),
@@ -1022,14 +1037,14 @@ void StarPlatCodeGen::visitFunction(const Function* function, mlir::SymbolTable*
             llvm::StringRef graphId = arg->getTemplateType()->getGraphName()->getname();
 
             if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propNode") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
+                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }
             else if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propEdge") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
+                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }

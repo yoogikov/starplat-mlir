@@ -281,15 +281,19 @@ def GetEdgePropertyOp : StarplatBaseOp<"getEdgeProperty">
     
     let regions = (region AnyRegion:$body);
  }
+
 def ForAllNodesOp : StarplatBaseOp<"forallnodes", [SymbolTable, Symbol]>
 {
     let summary = "ForAll over all nodes in a graph";
     let arguments = (ins
         AnyType:$graph,
-        AnyType:$loopVar,
         SymbolNameAttr:$sym_name
     );
     let regions = (region AnyRegion:$body);
+    
+    let extraClassDeclaration = [{
+        BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
+    }];
 }
 
 def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", [SymbolTable, Symbol]>
@@ -298,10 +302,13 @@ def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", [SymbolTable, Symbol
     let arguments = (ins
         AnyType:$graph,
         AnyType:$node,
-        AnyType:$loopVar,
         SymbolNameAttr:$sym_name
     );
     let regions = (region AnyRegion:$body);
+
+    let extraClassDeclaration = [{
+        BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
+    }];
 }
 
 def NodeCmpOp : StarplatBaseOp<"nodecmp">
