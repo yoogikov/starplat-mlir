@@ -52,6 +52,8 @@ class StarPlatCodeGen : public MLIRVisitor
 
     virtual void visitForallStmt(const ForallStatement* forAllStmt, mlir::SymbolTable* symbolTable) override;
 
+    virtual void visitDoWhileStmt(const DoWhileStatement* doWhileStmt, mlir::SymbolTable* symbolTable) override;
+
     virtual void visitMemberaccessStmt(const MemberacceessStmt* MemberacceessStmt, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitIfStmt(const IfStatement* ifStmt, mlir::SymbolTable* symbolTable) override;
@@ -75,6 +77,16 @@ class StarPlatCodeGen : public MLIRVisitor
     virtual void visitTupleAssignment(const TupleAssignment* tupleAssignment, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitAdd(const Add* add, mlir::SymbolTable* symbolTable) override;
+
+    virtual void visitSub(const Sub* sub, mlir::SymbolTable* symbolTable) override;
+    
+    virtual void visitMul(const Mul* mul, mlir::SymbolTable* symbolTable) override;
+    
+    virtual void visitDiv(const Div* div, mlir::SymbolTable* symbolTable) override;
+    
+    virtual void visitAnd(const And* _and, mlir::SymbolTable* symbolTable) override;
+    
+    virtual void visitOr(const Or* _or, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitFunction(const Function* function, mlir::SymbolTable* symbolTable) override;
 
@@ -115,6 +127,8 @@ class StarPlatCodeGen : public MLIRVisitor
     mlir::MLIRContext* getContext();
 
     mlir::ModuleOp* getModule();
+
+    mlir::Value resolveExpr(const Expression* expr, mlir::SymbolTable* symbolTable);
 
   private:
     mlir::MLIRContext context;

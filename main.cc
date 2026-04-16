@@ -80,11 +80,11 @@ int main(int argc, char* argv[]) {
 
     // printf("Parsing Complete\n");
 
-    // CodeGen* codegen = new CodeGen;
+    CodeGen* codegen = new CodeGen;
 
-    // if (root != nullptr)
-    //     // Accept(codegen) just dumps the AST
-    //     root->Accept(codegen);
+    if (root != nullptr)
+        // Accept(codegen) just dumps the AST
+        root->Accept(codegen);
 
     StarPlatCodeGen* starplatcodegen = new StarPlatCodeGen;
 
@@ -97,30 +97,26 @@ int main(int argc, char* argv[]) {
 
     starplatcodegen->print();
 
-    PassManager pm(starplatcodegen->getContext());
-    pm.addPass(mlir::starplat::createConvertStarPlatIRToBasePass());
-    // if (target == OMP)
-    //     pm.addPass(createConvertSCFToOpenMPPass());
+    // PassManager pm(starplatcodegen->getContext());
+    // pm.addPass(mlir::starplat::createConvertStarPlatIRToOMPPass());
     // pm.addPass(mlir::createSCFToControlFlowPass());
     // pm.addPass(mlir::createArithToLLVMConversionPass());
     // pm.addPass(mlir::createConvertIndexToLLVMPass());
     // pm.addPass(mlir::createConvertControlFlowToLLVMPass());
     // pm.addPass(mlir::createConvertFuncToLLVMPass());
     // pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
-    // pm.addPass(mlir::createConvertOpenMPToLLVMPass());
     // pm.addPass(mlir::createReconcileUnrealizedCastsPass());
-    //
-    // // // RUN the pass on the module
-    if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
-        llvm::errs() << "StarPlat → Base lowering failed\n";
-        return 0;
-    }
 
-    starplatcodegen->print();
-    //
+    // // // // RUN the pass on the module
+    // // if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
+    // //     llvm::errs() << "StarPlat → OMP lowering failed\n";
+    // //     return 0;
+    // // }
+
+    // // starplatcodegen->print();
+
     // mlir::DialectRegistry registry;
     // mlir::registerBuiltinDialectTranslation(registry);
-    // mlir::registerOpenMPDialectTranslation(registry);
     // mlir::registerLLVMDialectTranslation(registry); // Register the translation
     // // st.appendDialectRegistry(registry);
     // starplatcodegen->getContext()->appendDialectRegistry(registry);
@@ -128,8 +124,7 @@ int main(int argc, char* argv[]) {
     // auto llvmModule = mlir::translateModuleToLLVMIR(starplatcodegen->getModule()->getOperation(), llvmcontext); // starplatcodegen->print();
     // llvmModule->setTargetTriple(llvm::Triple("x86_64-unknown-linux-gnu"));
     // llvmModule->print(llvm::outs(), nullptr);
-    //
-    //
+
     // module {
     //   llvm.func @Compute_TC(%arg0: !llvm.ptr) -> i64 {
     //     %0 = llvm.mlir.constant(0 : i64) : i64

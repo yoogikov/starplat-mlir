@@ -585,115 +585,91 @@ struct ConvertForAllNeighboursOp : public OpConversionPattern<mlir::starplat::Fo
     }
 };
 
-struct ConvertForAllNodesOp : public OpConversionPattern<mlir::starplat::ForAllNodesOp>
+struct ForallNodesOpLowering : public OpConversionPattern<starplat::ForAllNodesOp>
 {
     using OpConversionPattern::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(mlir::starplat::ForAllNodesOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
-        auto loc   = op.getLoc();
-        Value zero = arith::ConstantIndexOp::create(rewriter, loc, 0);
-        Value one  = arith::ConstantIndexOp::create(rewriter, loc, 1);
-        // llvm::errs() << "=== ConvertAssignOp firing ===\n";
-        // llvm::errs() << "Original operand 0 type: " << op->getOperand(0).getType() << "\n";
-        // llvm::errs() << "Original operand 1 type: " << op->getOperand(1).getType() << "\n";
-        // llvm::errs() << "Adaptor operand 0 type:  " << adaptor.getOperands()[0].getType() << "\n";
-        // llvm::errs() << "Adaptor operand 1 type:  " << adaptor.getOperands()[1].getType() << "\n";
-        //
-        // // also dump the defining op of operand 0
-        // llvm::errs() << "Operand 0 defined by: ";
-        // adaptor.getOperands()[0].getDefiningOp()->dump();
-        // llvm::errs() << "Operand 1 defined by: ";
-        // adaptor.getOperands()[1].getDefiningOp()->dump();
-        //
-        //
-        // auto storeop = LLVM::StoreOp::create(rewriter, op.getLoc(), adaptor.getOperands()[1], adaptor.getOperands()[0]);
-        //
-        auto module                = op->getParentOfType<mlir::ModuleOp>();
-        mlir::MLIRContext* context = getContext();
-        FailureOr<LLVM::LLVMFuncOp> graphCountNodes =
-            LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {LLVM::LLVMPointerType::get(context)}, rewriter.getI32Type());
-        // FailureOr<LLVM::LLVMFuncOp> graphNodeArray =
-        //     LLVM::lookupOrCreateFn(rewriter, module, "get_nodes", {LLVM::LLVMPointerType::get(context)}, LLVM::LLVMPointerType::get(context));
-        auto num_nodes = LLVM::CallOp::create(rewriter, loc, *graphCountNodes, ValueRange{adaptor.getOperands()[0]});
-        // auto node_array = LLVM::CallOp::create(rewriter, loc, *graphNodeArray, ValueRange{adaptor.getOperands()[0]});
-        // Value five        = arith::ConstantIndexOp::create(rewriter, loc, num_nodes);
-        Value node_count = arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(), num_nodes.getResult());
+    LogicalResult matchAndRewrite(starplat::ForAllNodesOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc        = op.getLoc();
+        auto* ctx       = rewriter.getContext();
+        ModuleOp module = op->getParentOfType<ModuleOp>();
 
-        Block* body;
-        auto parparent = op->getParentOfType<mlir::scf::ParallelOp>();
-        if (parparent) {
-            auto forOp = scf::ForOp::create(rewriter, loc, zero, // lower bounds
-                                            node_count,          // uper bounds
-                                            one,                 // steps
-                                            ValueRange{},        // shared outputs (none)
-                                            [&](OpBuilder& b, Location loc, ValueRange args, ValueRange initVals)
-                                            {
-                                                mlir::Value iv   = args[0];
-                                                mlir::Value node = arith::IndexCastOp::create(b, loc, b.getI32Type(), iv);
+        Value graphPtr  = adaptor.getOperands()[0]; // !llvm.ptr
 
-                                                // mlir::Value elemPtr = LLVM::GEPOp::create(b, loc, LLVM::LLVMPointerType::get(context),
-                                                //                                              LLVM::LLVMPointerType::get(context),
-                                                //                                              node_array.getResult(), ValueRange{ivI64});
-                                                // mlir::Value node    = LLVM::LoadOp::create(b, loc, LLVM::LLVMPointerType::get(context),
-                                                // elemPtr);
-                                                LLVM::StoreOp::create(b, loc, node, adaptor.getOperands()[1]);
+        auto i32Ty      = rewriter.getI32Type();
+        auto idxTy      = rewriter.getIndexType();
+        auto ptrTy      = LLVM::LLVMPointerType::get(ctx);
 
-                                                scf::YieldOp::create(b, loc);
-                                            });
+        // --- Declare + call get_num_nodes(ptr) -> i32 ---------------------------
+        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn = LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
+        if (failed(getNumNodesFn))
+            return failure();
 
-            body       = forOp.getBody();
+        Value nI32    = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
+        Value nIdx    = arith::IndexCastOp::create(rewriter, loc, idxTy, nI32);
+
+        Value zeroIdx = arith::ConstantIndexOp::create(rewriter, loc, 0);
+        Value oneIdx  = arith::ConstantIndexOp::create(rewriter, loc, 1);
+        Value oneI32  = LLVM::ConstantOp::create(rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+
+        // --- Nesting check ------------------------------------------------------
+        bool nestedInParallel = op->getParentOfType<scf::ParallelOp>() || op->getParentOfType<scf::ForallOp>();
+
+        // Helper: given the IV (index), materialize an llvm.ptr-to-i32 slot
+        // holding the current index, to replace the starplat region's block arg.
+        auto materializeNodePtr = [&](OpBuilder& b, Location l, Value iv) -> Value
+        {
+            Value iI32 = arith::IndexCastOp::create(b, l, i32Ty, iv);
+            Value slot = LLVM::AllocaOp::create(b, l, ptrTy, i32Ty, oneI32,
+                                                /*alignment=*/0);
+            LLVM::StoreOp::create(b, l, iI32, slot);
+            return slot;
+        };
+
+        // The body region of the starplat op. We'll splice its single block
+        // into whichever loop we generate, dropping the starplat.end terminator.
+        Region& srcRegion = op.getRegion();
+        Block& srcBlock   = srcRegion.front();
+
+        if (nestedInParallel) {
+            // ---------------- scf.for (sequential) ------------------------------
+            auto forOp = scf::ForOp::create(rewriter, loc, zeroIdx, nIdx, oneIdx);
+
+            // Build the body.
+            {
+                OpBuilder::InsertionGuard g(rewriter);
+                rewriter.setInsertionPointToStart(forOp.getBody());
+
+                Value nodePtr = materializeNodePtr(rewriter, loc, forOp.getInductionVar());
+
+                // Splice starplat body ops before the auto-inserted scf.yield.
+                // Remove starplat.end from the source block first.
+                auto endOp = cast<starplat::endOp>(srcBlock.getTerminator());
+                rewriter.eraseOp(endOp);
+
+                // Map srcBlock's single block arg (the !starplat.node ptr) to our slot.
+                rewriter.mergeBlocks(&srcBlock, forOp.getBody(), ValueRange{nodePtr});
+            }
         }
         else {
-            auto parallelOp = scf::ParallelOp::create(rewriter, loc, zero, // lower bounds
-                                                      node_count,          // uper bounds
-                                                      one,                 // steps
-                                                      ValueRange{},        // shared outputs (none)
-                                                      [&](OpBuilder& b, Location loc, ValueRange args, ValueRange initVals)
-                                                      {
-                                                          mlir::Value iv   = args[0];
-                                                          mlir::Value node = arith::IndexCastOp::create(b, loc, b.getI32Type(), iv);
+            // ---------------- scf.parallel --------------------------------------
+            auto parOp = scf::ParallelOp::create(rewriter, loc, ValueRange{zeroIdx}, ValueRange{nIdx}, ValueRange{oneIdx},
+                                                 /*initVals=*/ValueRange{});
 
-                                                          // mlir::Value elemPtr = LLVM::GEPOp::create(b, loc, LLVM::LLVMPointerType::get(context),
-                                                          //                                              LLVM::LLVMPointerType::get(context),
-                                                          //                                              node_array.getResult(), ValueRange{ivI64});
-                                                          // mlir::Value node    = LLVM::LoadOp::create(b, loc, LLVM::LLVMPointerType::get(context),
-                                                          // elemPtr);
-                                                          LLVM::StoreOp::create(b, loc, node, adaptor.getOperands()[1]);
+            {
+                OpBuilder::InsertionGuard g(rewriter);
+                rewriter.setInsertionPointToStart(parOp.getBody());
 
-                                                          // scf::InParallelOp::create(b, loc);
-                                                      });
+                Value nodePtr = materializeNodePtr(rewriter, loc, parOp.getInductionVars()[0]);
 
-            body            = parallelOp.getBody();
-        }
-        // auto nodes        = LLVM::CallOp::create(rewriter, loc, *graphAddEdgeFn, ValueRange{adaptor.getOperands()[0]});
-        // auto storeop = LLVM::StoreOp::create(rewriter, op.getLoc(), adaptor.getOperands()[1], adaptor.getOperands()[0]);
-        rewriter.setInsertionPoint(body->getTerminator());
+                auto endOp    = cast<starplat::endOp>(srcBlock.getTerminator());
+                rewriter.eraseOp(endOp);
 
-        // rewriter.moveOpBefore(nodes, forallBody->getTerminator());
-
-        // rewriter.setInsertionPointToStart(forallBody);
-
-        // llvm::errs() << "\n";
-        // llvm::errs() << adaptor.getOperands()[0] << "\n";
-        // llvm::errs() << adaptor.getOperands()[1] << "\n";
-        // llvm::errs() << "\n";
-        // LLVM::CallOp::create(rewriter, loc, *graphAddEdgeFn, ValueRange{});
-
-        // rewriter.inlineBlockBefore(&op.getBody().front(), forallBody, forallBody->end());
-
-        Block& srcBlock = op.getBody().front();
-        for (auto& innerOp : llvm::make_early_inc_range(srcBlock)) {
-
-            // llvm::errs() << "hi\n";
-            if (isa<starplat::endOp>(&innerOp)) {
-                rewriter.eraseOp(&innerOp); // erase starplat.end, keep scf terminator
-                continue;
+                rewriter.mergeBlocks(&srcBlock, parOp.getBody(), ValueRange{nodePtr});
             }
-            rewriter.moveOpBefore(&innerOp, body->getTerminator());
         }
 
         rewriter.eraseOp(op);
-
         return success();
     }
 };
@@ -1274,7 +1250,7 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         patterns.add<ConvertDeclareOp2>(typeConverter, context);
         patterns.add<ConvertConstOp>(typeConverter, context);
         patterns.add<ConvertAssignOp>(context);
-        patterns.add<ConvertForAllNodesOp>(typeConverter, context);
+        patterns.add<ForallNodesOpLowering>(typeConverter, context);
         patterns.add<ConvertForAllNeighboursOp>(typeConverter, context);
         patterns.add<ConvertIfOp>(typeConverter, context);
         patterns.add<ConvertNodeCmpOp>(typeConverter, context);

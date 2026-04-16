@@ -190,6 +190,17 @@ ASTNode* ForallStatement::getstmtlist() const { return stmtlist_; }
 void ForallStatement::Accept(Visitor* visitor) const { visitor->visitForallStmt(this); }
 void ForallStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitForallStmt(this, symbolTable); }
 
+// DoWhileStatment
+DoWhileStatement::DoWhileStatement(ASTNode* expr, ASTNode* stmtlist) : expr_(expr), stmtlist_(stmtlist) {}
+DoWhileStatement::~DoWhileStatement() {
+    delete expr_;
+    delete stmtlist_;
+}
+ASTNode* DoWhileStatement::getexpr() const { return expr_; }
+ASTNode* DoWhileStatement::getstmtlist() const { return stmtlist_; }
+void DoWhileStatement::Accept(Visitor* visitor) const { visitor->visitDoWhileStmt(this); }
+void DoWhileStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitDoWhileStmt(this, symbolTable); }
+
 // IfStatement
 IfStatement::IfStatement(ASTNode* expr, ASTNode* stmt) : expr(expr), stmt(stmt) {}
 IfStatement::IfStatement() {}
@@ -226,6 +237,61 @@ ASTNode* Add::getOperand1() const { return operand1_; }
 ASTNode* Add::getOperand2() const { return operand2_; }
 void Add::Accept(Visitor* visitor) const { visitor->visitAdd(this); }
 void Add::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitAdd(this, symbolTable); }
+
+// Sub
+Sub::Sub(ASTNode* operand1, ASTNode* operand2) : operand1_(operand1), operand2_(operand2) {}
+Sub::~Sub() {
+    delete operand1_;
+    delete operand2_;
+}
+ASTNode* Sub::getOperand1() const { return operand1_; }
+ASTNode* Sub::getOperand2() const { return operand2_; }
+void Sub::Accept(Visitor* visitor) const { visitor->visitSub(this); }
+void Sub::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitSub(this, symbolTable); }
+
+// Mul
+Mul::Mul(ASTNode* operand1, ASTNode* operand2) : operand1_(operand1), operand2_(operand2) {}
+Mul::~Mul() {
+    delete operand1_;
+    delete operand2_;
+}
+ASTNode* Mul::getOperand1() const { return operand1_; }
+ASTNode* Mul::getOperand2() const { return operand2_; }
+void Mul::Accept(Visitor* visitor) const { visitor->visitMul(this); }
+void Mul::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitMul(this, symbolTable); }
+
+// Div
+Div::Div(ASTNode* operand1, ASTNode* operand2) : operand1_(operand1), operand2_(operand2) {}
+Div::~Div() {
+    delete operand1_;
+    delete operand2_;
+}
+ASTNode* Div::getOperand1() const { return operand1_; }
+ASTNode* Div::getOperand2() const { return operand2_; }
+void Div::Accept(Visitor* visitor) const { visitor->visitDiv(this); }
+void Div::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitDiv(this, symbolTable); }
+
+// And
+And::And(ASTNode* operand1, ASTNode* operand2) : operand1_(operand1), operand2_(operand2) {}
+And::~And() {
+    delete operand1_;
+    delete operand2_;
+}
+ASTNode* And::getOperand1() const { return operand1_; }
+ASTNode* And::getOperand2() const { return operand2_; }
+void And::Accept(Visitor* visitor) const { visitor->visitAnd(this); }
+void And::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitAnd(this, symbolTable); }
+
+// Or
+Or::Or(ASTNode* operand1, ASTNode* operand2) : operand1_(operand1), operand2_(operand2) {}
+Or::~Or() {
+    delete operand1_;
+    delete operand2_;
+}
+ASTNode* Or::getOperand1() const { return operand1_; }
+ASTNode* Or::getOperand2() const { return operand2_; }
+void Or::Accept(Visitor* visitor) const { visitor->visitOr(this); }
+void Or::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitOr(this, symbolTable); }
 
 // Assignment
 Assignment::Assignment(char* identifier, ASTNode* expr) : identifier(identifier), expr(expr) {}

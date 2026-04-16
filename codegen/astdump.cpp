@@ -41,8 +41,99 @@ void CodeGen::visitDeclarationStmt(const DeclarationStatement* dclstmt) {
 }
 
 void CodeGen::visitAdd(const Add* add) {
-    llvm::errs() << "visitAdd not implemented\n";
-    std::abort();
+    beautifier.print_tab();
+    cout << "Add Expression: {\n";
+    ++beautifier;
+
+    Expression* expr1 = static_cast<Expression*>(add->getOperand1());
+    Expression* expr2 = static_cast<Expression*>(add->getOperand2());
+
+    expr1->Accept(this);
+    expr2->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
+void CodeGen::visitSub(const Sub* sub) {
+    beautifier.print_tab();
+    cout << "Subtraction Expression: {\n";
+    ++beautifier;
+
+    Expression* expr1 = static_cast<Expression*>(sub->getOperand1());
+    Expression* expr2 = static_cast<Expression*>(sub->getOperand2());
+
+    expr1->Accept(this);
+    expr2->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
+void CodeGen::visitMul(const Mul* mul) {
+    beautifier.print_tab();
+    cout << "Multiplication Expression: {\n";
+    ++beautifier;
+
+    Expression* expr1 = static_cast<Expression*>(mul->getOperand1());
+    Expression* expr2 = static_cast<Expression*>(mul->getOperand2());
+
+    expr1->Accept(this);
+    expr2->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
+void CodeGen::visitDiv(const Div* div) {
+    beautifier.print_tab();
+    cout << "Division Expression: {\n";
+    ++beautifier;
+
+    Expression* expr1 = static_cast<Expression*>(div->getOperand1());
+    Expression* expr2 = static_cast<Expression*>(div->getOperand2());
+
+    expr1->Accept(this);
+    expr2->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
+void CodeGen::visitAnd(const And* _and) {
+    beautifier.print_tab();
+    cout << "And Expression: {\n";
+    ++beautifier;
+
+    Expression* expr1 = static_cast<Expression*>(_and->getOperand1());
+    Expression* expr2 = static_cast<Expression*>(_and->getOperand2());
+
+    expr1->Accept(this);
+    expr2->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
+void CodeGen::visitOr(const Or* _or) {
+    beautifier.print_tab();
+    cout << "Or Expression: {\n";
+    ++beautifier;
+
+    Expression* expr1 = static_cast<Expression*>(_or->getOperand1());
+    Expression* expr2 = static_cast<Expression*>(_or->getOperand2());
+
+    expr1->Accept(this);
+    expr2->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
 }
 
 void CodeGen::visitMemberaccessStmt(const MemberacceessStmt* memberAccess) {
@@ -94,6 +185,36 @@ void CodeGen::visitForallStmt(const ForallStatement* forAllStmt) {
     cout << "}\n";
 }
 
+void CodeGen::visitDoWhileStmt(const DoWhileStatement* doWhileStmt) {
+    beautifier.print_tab();
+    std::cout << "DoWhile: {\n";
+    ++beautifier;
+
+    beautifier.print_tab();
+    std::cout << "Loop Expr: {\n";
+    ++beautifier;
+
+    doWhileStmt->getexpr()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    beautifier.print_tab();
+    std::cout << "Loop Body: {\n";
+    ++beautifier;
+
+    doWhileStmt->getstmtlist()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
 void CodeGen::visitIfStmt(const IfStatement* ifStmt) {
     beautifier.print_tab();
     std::cout << "If Statement: {\n";
@@ -107,7 +228,20 @@ void CodeGen::visitIfStmt(const IfStatement* ifStmt) {
     std::cout << "}\n";
 }
 
-void CodeGen::visitBoolExpr(const BoolExpr* boolExpr) { std::cout << "Visit Bool Statement\n"; }
+void CodeGen::visitBoolExpr(const BoolExpr* boolExpr) { 
+    beautifier.print_tab();
+    std::cout << "Bool Expression {\n";
+    ++beautifier;
+
+    boolExpr->getExpr1()->Accept(this);
+    beautifier.print_tab();
+    std::cout << "Operator: " << boolExpr->getop() << "\n";
+    boolExpr->getExpr2()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+}
 
 void CodeGen::visitIncandassignstmt(const Incandassignstmt* incandassignstmt) {
     beautifier.print_tab();
@@ -306,12 +440,12 @@ void CodeGen::visitStatementlist(const Statementlist* stmtlist) {
 
 void CodeGen::visitType(const TypeExpr* type) { 
     beautifier.print_tab();
-    cout << "type: " << type->getType() << "\n"; 
+    cout << "Type: " << type->getType() << "\n"; 
 }
 
 void CodeGen::visitNumber(const Number* number) { 
     beautifier.print_tab();
-    cout << "number: " << number->getnumber() << "\n"; 
+    cout << "Number: " << number->getnumber() << "\n"; 
 }
 
 void CodeGen::visitExpression(const Expression* expr) {
