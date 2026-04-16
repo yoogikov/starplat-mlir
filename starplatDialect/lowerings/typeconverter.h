@@ -38,6 +38,7 @@ class StarPlatTypeConverter : public TypeConverter
 
         addConversion([ctx](starplat::GraphType type) -> std::optional<Type> { return LLVM::LLVMPointerType::get(ctx); });
         addConversion([ctx](starplat::NodeType type) -> std::optional<Type> { return LLVM::LLVMPointerType::get(ctx); });
+        addConversion([ctx](starplat::EdgeType type) -> std::optional<Type> { return LLVM::LLVMPointerType::get(ctx); });
         addConversion([ctx](starplat::SPIntType type) -> std::optional<Type> { return LLVM::LLVMPointerType::get(ctx); });
         addConversion([](starplat::PropNodeType type) -> std::optional<Type>
                       { // llvm::errs() << type.getGraphId();
