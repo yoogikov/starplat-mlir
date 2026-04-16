@@ -786,25 +786,19 @@ void StarPlatCodeGen::visitAssignmentStmt(const AssignmentStmt* assignemntStmt, 
     char* identifier       = assignment->getIdentifier();
     Expression* expr       = static_cast<Expression*>(assignment->getexpr());
 
-    if (expr->getKind() == KIND_IDENTIFIER) {
-        // Global lookup.
-        // Build store op.
-        auto lhs                = globalLookupOp(identifier);
-        const Identifier* rhsId = static_cast<const Identifier*>(expr->getExpression());
-        auto rhs                = globalLookupOp(rhsId->getname());
-
-        if (lhs && rhs)
-            mlir::starplat::StoreOp::create(builder, builder.getUnknownLoc(), lhs, rhs);
-        else {
-            llvm::errs() << "Not Implemented\n";
-            exit(0);
-        }
+    auto lhs = globalLookupOp(identifier);
+    if (!lhs) {
+        llvm::errs() << "Error: Undefined identifier '" << identifier << "'\n";
+        return;
     }
 
-    else {
-        llvm::errs() << "Not Implemented!\n";
-        exit(0); // Abort
+    mlir::Value rhs = resolveExpr(expr, symbolTable);
+    if (!rhs) {
+        llvm::errs() << "Error: Failed to resolve RHS of assignment.\n";
+        return;
     }
+
+    mlir::starplat::StoreOp::create(builder, builder.getUnknownLoc(), lhs, rhs);
 }
 
 void StarPlatCodeGen::visitIdentifier(const Identifier* identifier, mlir::SymbolTable* symbolTable) {}
