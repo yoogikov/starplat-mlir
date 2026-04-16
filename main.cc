@@ -97,8 +97,8 @@ int main(int argc, char* argv[]) {
 
     starplatcodegen->print();
 
-    // PassManager pm(starplatcodegen->getContext());
-    // pm.addPass(mlir::starplat::createConvertStarPlatIRToBasePass());
+    PassManager pm(starplatcodegen->getContext());
+    pm.addPass(mlir::starplat::createConvertStarPlatIRToBasePass());
     // if (target == OMP)
     //     pm.addPass(createConvertSCFToOpenMPPass());
     // pm.addPass(mlir::createSCFToControlFlowPass());
@@ -111,12 +111,12 @@ int main(int argc, char* argv[]) {
     // pm.addPass(mlir::createReconcileUnrealizedCastsPass());
     //
     // // // RUN the pass on the module
-    // if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
-    //     llvm::errs() << "StarPlat → Base lowering failed\n";
-    //     return 0;
-    // }
+    if (mlir::failed(pm.run(starplatcodegen->getModule()->getOperation()))) {
+        llvm::errs() << "StarPlat → Base lowering failed\n";
+        return 0;
+    }
 
-    // starplatcodegen->print();
+    starplatcodegen->print();
     //
     // mlir::DialectRegistry registry;
     // mlir::registerBuiltinDialectTranslation(registry);

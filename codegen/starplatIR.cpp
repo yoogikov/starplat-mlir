@@ -78,7 +78,7 @@ void StarPlatCodeGen::visitTemplateDeclarationStmt(const TemplateDeclarationStat
         mlir::Type type;
 
         if (std::string(Type->getType()->getType()) == "int")
-            type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+            type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
         else if (std::string(Type->getType()->getType()) == "bool")
             type = builder.getType<mlir::starplat::PropNodeType>(builder.getI1Type(), graphId);
         else {
@@ -416,8 +416,8 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     const Memberaccess* memberaccess  = static_cast<const Memberaccess*>(expr->getExpression());
     const Methodcall* outermethodcall = static_cast<const Methodcall*>(memberaccess->getMethodCall());
 
-    bool isNeighbours = false;
-    bool hasFilter    = false;
+    bool isNeighbours                 = false;
+    bool hasFilter                    = false;
     mlir::Value graphSymbol;
     mlir::Value nodeSymbol;
     mlir::Value rhsFilterSymbol;
@@ -467,16 +467,15 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
         }
 
         // Check for filter — only parse/store, do NOT emit ops yet
-        if (outermethodcall && outermethodcall->getIsBuiltin() &&
-            strcmp(outermethodcall->getIdentifier()->getname(), "filter") == 0) {
-            hasFilter = true;
+        if (outermethodcall && outermethodcall->getIsBuiltin() && strcmp(outermethodcall->getIdentifier()->getname(), "filter") == 0) {
+            hasFilter                    = true;
             const Expression* filterExpr = static_cast<const Expression*>(outermethodcall->getParamLists());
             const BoolExpr* boolExpr     = static_cast<const BoolExpr*>(filterExpr->getExpression());
             const Expression* lhsExpr    = static_cast<const Expression*>(boolExpr->getExpr1());
             const Expression* rhsExpr    = static_cast<const Expression*>(boolExpr->getExpr2());
             filterOp                     = std::string(boolExpr->getop());
 
-            lhsExprKind = lhsExpr->getKind();
+            lhsExprKind                  = lhsExpr->getKind();
 
             // LHS: store ingredients, don't emit
             if (lhsExpr->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
@@ -494,14 +493,16 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
                     llvm::outs() << "Error: Undefined node or property in filter.\n";
                     return;
                 }
-            } else if (lhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
+            }
+            else if (lhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* lhsId = static_cast<const Identifier*>(lhsExpr->getExpression());
-                lhsFilterSymbol = globalLookupOp(lhsId->getname());
+                lhsFilterSymbol         = globalLookupOp(lhsId->getname());
                 if (!lhsFilterSymbol) {
                     llvm::outs() << "Error: Undefined identifier '" << lhsId->getname() << "' in filter.\n";
                     return;
                 }
-            } else {
+            }
+            else {
                 llvm::outs() << "Error: Unsupported filter LHS expression.\n";
                 return;
             }
@@ -509,14 +510,15 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
             // RHS: constants are fine to resolve now
             if (rhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* rhsId = static_cast<const Identifier*>(rhsExpr->getExpression());
-                rhsFilterSymbol = globalLookupOp(rhsId->getname());
+                rhsFilterSymbol         = globalLookupOp(rhsId->getname());
                 if (!rhsFilterSymbol) {
                     llvm::outs() << "Error: Undefined identifier '" << rhsId->getname() << "' in filter.\n";
                     return;
                 }
-            } else if (rhsExpr->getKind() == ExpressionKind::KIND_KEYWORD) {
+            }
+            else if (rhsExpr->getKind() == ExpressionKind::KIND_KEYWORD) {
                 const Keyword* rhsKw = static_cast<const Keyword*>(rhsExpr->getExpression());
-                rhsFilterSymbol = globalLookupOp(rhsKw->getKeyword());
+                rhsFilterSymbol      = globalLookupOp(rhsKw->getKeyword());
                 if (!rhsFilterSymbol) {
                     rhsKw->Accept(this, symbolTable);
                     rhsFilterSymbol = globalLookupOp(rhsKw->getKeyword());
@@ -525,7 +527,8 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
                     llvm::outs() << "Error: Undefined keyword '" << rhsKw->getKeyword() << "' in filter.\n";
                     return;
                 }
-            } else {
+            }
+            else {
                 llvm::outs() << "Error: Unsupported filter RHS expression.\n";
                 return;
             }
@@ -586,22 +589,16 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     if (hasFilter) {
         // NOW inside the loop body — emit GetNodePropertyOp for v.modified etc.
         if (lhsExprKind == ExpressionKind::KIND_MEMBERACCESS) {
-            auto getProp = mlir::starplat::GetNodePropertyOp::create(
-                builder, builder.getUnknownLoc(), builder.getI64Type(),
-                lhsNodeVal, lhsPropVal,
-                builder.getStringAttr(lhsPropName));
+            auto getProp = mlir::starplat::GetNodePropertyOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), lhsNodeVal, lhsPropVal,
+                                                                     builder.getStringAttr(lhsPropName));
             lhsFilterSymbol = getProp->getResult(0);
         }
         // if KIND_IDENTIFIER, lhsFilterSymbol is already set above
 
-        auto cmpOp = mlir::starplat::CmpOp::create(builder, builder.getUnknownLoc(),
-                                                    mlir::IntegerType::get(builder.getContext(), 1),
-                                                    lhsFilterSymbol, rhsFilterSymbol,
-                                                    builder.getStringAttr(filterOp));
+        auto cmpOp = mlir::starplat::CmpOp::create(builder, builder.getUnknownLoc(), mlir::IntegerType::get(builder.getContext(), 1), lhsFilterSymbol,
+                                                   rhsFilterSymbol, builder.getStringAttr(filterOp));
 
-        auto ifOp = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(),
-                                                          cmpOp->getResult(0),
-                                                          builder.getStringAttr("spif"));
+        auto ifOp  = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), cmpOp->getResult(0), builder.getStringAttr("spif"));
         auto& ifBlock = ifOp.getBody().emplaceBlock();
         builder.setInsertionPointToStart(&ifBlock);
 
@@ -625,8 +622,8 @@ void StarPlatCodeGen::visitMemberaccessStmt(const MemberacceessStmt* Memberaccee
     methodcallnode->Accept(this, symbolTable);
     std::vector<Param*> paramListVector = paramlist->getParamList();
 
-    const Identifier* identifier1 = memberaccessnode->getIdentifier();
-    auto graph                    = globalLookupOp(identifier1->getname());
+    const Identifier* identifier1       = memberaccessnode->getIdentifier();
+    auto graph                          = globalLookupOp(identifier1->getname());
     if (!graph) {
         llvm::outs() << "Error: Graph not defined!\n";
         return;
@@ -848,48 +845,58 @@ void StarPlatCodeGen::visitTupleAssignment(const TupleAssignment* tupleAssignmen
     mlir::Value lhsNode2, lhsProp2;
 
     // RHS operands
-    mlir::Operation* rhsValue1Op;  // GetNodePropertyOp for Min's first arg (e.g. nbr.dist)
-    mlir::Operation* rhsValue2Op;  // AddOp result (e.g. v.dist + e.weight)
-    mlir::Value      updateValue;  // e.g. True
+    mlir::Operation* rhsValue1Op; // GetNodePropertyOp for Min's first arg (e.g. nbr.dist)
+    mlir::Operation* rhsValue2Op; // AddOp result (e.g. v.dist + e.weight)
+    mlir::Value updateValue;      // e.g. True
 
     // ---- LHS1: extract node + prop as Values, no GetNodePropertyOp ----
     if (lhsexpr1->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
         const Memberaccess* lhs1 = static_cast<const Memberaccess*>(lhsexpr1->getExpression());
         if (!lhs1->getIdentifier() || !lhs1->getIdentifier2()) {
-            llvm::outs() << "Error: Tuple Assignment failed.\n"; return;
+            llvm::outs() << "Error: Tuple Assignment failed.\n";
+            return;
         }
         lhsNode1 = globalLookupOp(lhs1->getIdentifier()->getname());
         lhsProp1 = globalLookupOp(lhs1->getIdentifier2()->getname());
         if (!lhsNode1 || !lhsProp1) {
-            llvm::outs() << "Error: Undefined var/prop in lhs1.\n"; return;
+            llvm::outs() << "Error: Undefined var/prop in lhs1.\n";
+            return;
         }
-    } else {
-        llvm::outs() << "Error: Tuple Assignment failed.\n"; return;
+    }
+    else {
+        llvm::outs() << "Error: Tuple Assignment failed.\n";
+        return;
     }
 
     // ---- LHS2: extract node + prop as Values, no GetNodePropertyOp ----
     if (lhsexpr2->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
         const Memberaccess* lhs2 = static_cast<const Memberaccess*>(lhsexpr2->getExpression());
         if (!lhs2->getIdentifier() || !lhs2->getIdentifier2()) {
-            llvm::outs() << "Error: Tuple Assignment failed.\n"; return;
+            llvm::outs() << "Error: Tuple Assignment failed.\n";
+            return;
         }
         lhsNode2 = globalLookupOp(lhs2->getIdentifier()->getname());
         lhsProp2 = globalLookupOp(lhs2->getIdentifier2()->getname());
         if (!lhsNode2 || !lhsProp2) {
-            llvm::outs() << "Error: Undefined var/prop in lhs2.\n"; return;
+            llvm::outs() << "Error: Undefined var/prop in lhs2.\n";
+            return;
         }
-    } else {
-        llvm::outs() << "Error: Tuple Assignment failed.\n"; return;
+    }
+    else {
+        llvm::outs() << "Error: Tuple Assignment failed.\n";
+        return;
     }
 
     // ---- RHS1: Min(...) method call ----
     if (rhsexpr1->getKind() != ExpressionKind::KIND_METHODCALL) {
-        llvm::outs() << "Error: Tuple Assignment failed.\n"; return;
+        llvm::outs() << "Error: Tuple Assignment failed.\n";
+        return;
     }
 
     const Methodcall* rhsMethodCall = static_cast<const Methodcall*>(rhsexpr1->getExpression());
     if (!rhsMethodCall->getIsBuiltin() || strcmp(rhsMethodCall->getIdentifier()->getname(), "Min") != 0) {
-        llvm::outs() << rhsMethodCall->getIdentifier()->getname() << " Not implemented yet.\n"; return;
+        llvm::outs() << rhsMethodCall->getIdentifier()->getname() << " Not implemented yet.\n";
+        return;
     }
 
     const Paramlist* rhsParamList = static_cast<const Paramlist*>(rhsMethodCall->getParamLists());
@@ -901,27 +908,35 @@ void StarPlatCodeGen::visitTupleAssignment(const TupleAssignment* tupleAssignmen
     // Min arg1: e.g. nbr.dist  — GetNodePropertyOp to read current value
     if (operand1->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
         const Memberaccess* op1Mem = static_cast<const Memberaccess*>(operand1->getExpression());
-        const Identifier* id1 = op1Mem->getIdentifier();
-        const Identifier* id2 = op1Mem->getIdentifier2();
-        if (!id1 || !id2) { llvm::outs() << "Error: Tuple Assignment Error.\n"; return; }
+        const Identifier* id1      = op1Mem->getIdentifier();
+        const Identifier* id2      = op1Mem->getIdentifier2();
+        if (!id1 || !id2) {
+            llvm::outs() << "Error: Tuple Assignment Error.\n";
+            return;
+        }
 
         auto nodeVal = globalLookupOp(id1->getname());
         auto propVal = globalLookupOp(id2->getname());
-        if (!nodeVal || !propVal) { llvm::outs() << id1->getname() << " or " << id2->getname() << " not defined.\n"; exit(0); }
+        if (!nodeVal || !propVal) {
+            llvm::outs() << id1->getname() << " or " << id2->getname() << " not defined.\n";
+            exit(0);
+        }
 
         if (!mlir::isa<mlir::starplat::NodeType>(nodeVal.getType())) {
-            llvm::outs() << "Error: Expected node type for Min arg1.\n"; exit(0);
+            llvm::outs() << "Error: Expected node type for Min arg1.\n";
+            exit(0);
         }
-        rhsValue1Op = mlir::starplat::GetNodePropertyOp::create(
-            builder, builder.getUnknownLoc(), builder.getI64Type(),
-            nodeVal, propVal, builder.getStringAttr(id2->getname()));
-    } else {
-        llvm::outs() << "Error: Not implemented @ Tuple Assignment.\n"; return;
+        rhsValue1Op = mlir::starplat::GetNodePropertyOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), nodeVal, propVal,
+                                                                builder.getStringAttr(id2->getname()));
+    }
+    else {
+        llvm::outs() << "Error: Not implemented @ Tuple Assignment.\n";
+        return;
     }
 
     // Min arg2: e.g. v.dist + e.weight — AddOp
     if (operand2->getKind() == ExpressionKind::KIND_ADDOP) {
-        const Add* add     = static_cast<const Add*>(operand2->getExpression());
+        const Add* add           = static_cast<const Add*>(operand2->getExpression());
         const Expression* addop1 = static_cast<const Expression*>(add->getOperand1());
         const Expression* addop2 = static_cast<const Expression*>(add->getOperand2());
 
@@ -930,59 +945,71 @@ void StarPlatCodeGen::visitTupleAssignment(const TupleAssignment* tupleAssignmen
 
         if (addop1->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
             const Memberaccess* m = static_cast<const Memberaccess*>(addop1->getExpression());
-            auto nv = globalLookupOp(m->getIdentifier()->getname());
-            auto pv = globalLookupOp(m->getIdentifier2()->getname());
-            if (!nv || !pv) { llvm::outs() << "Error: Undefined variables in Add op1.\n"; exit(0); }
-            if (!mlir::isa<mlir::starplat::NodeType>(nv.getType())) {
-                llvm::outs() << "Error: Type error in Min Func add op1.\n"; exit(0);
+            auto nv               = globalLookupOp(m->getIdentifier()->getname());
+            auto pv               = globalLookupOp(m->getIdentifier2()->getname());
+            if (!nv || !pv) {
+                llvm::outs() << "Error: Undefined variables in Add op1.\n";
+                exit(0);
             }
-            op1 = mlir::starplat::GetNodePropertyOp::create(
-                builder, builder.getUnknownLoc(), builder.getI64Type(),
-                nv, pv, builder.getStringAttr(m->getIdentifier2()->getname()));
-        } else {
-            llvm::outs() << "Error: Add Op1 Not Implemented.\n"; exit(0);
+            if (!mlir::isa<mlir::starplat::NodeType>(nv.getType())) {
+                llvm::outs() << "Error: Type error in Min Func add op1.\n";
+                exit(0);
+            }
+            op1 = mlir::starplat::GetNodePropertyOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), nv, pv,
+                                                            builder.getStringAttr(m->getIdentifier2()->getname()));
+        }
+        else {
+            llvm::outs() << "Error: Add Op1 Not Implemented.\n";
+            exit(0);
         }
 
         if (addop2->getKind() == ExpressionKind::KIND_MEMBERACCESS) {
             const Memberaccess* m = static_cast<const Memberaccess*>(addop2->getExpression());
-            auto ev = globalLookupOp(m->getIdentifier()->getname());
-            auto pv = globalLookupOp(m->getIdentifier2()->getname());
-            if (!ev || !pv) { llvm::outs() << "Error: Undefined variables in Add op2.\n"; exit(0); }
-            if (!mlir::isa<mlir::starplat::EdgeType>(ev.getType())) {
-                llvm::outs() << "Error: Type error in Min Func add op2.\n"; exit(0);
+            auto ev               = globalLookupOp(m->getIdentifier()->getname());
+            auto pv               = globalLookupOp(m->getIdentifier2()->getname());
+            if (!ev || !pv) {
+                llvm::outs() << "Error: Undefined variables in Add op2.\n";
+                exit(0);
             }
-            op2 = mlir::starplat::GetEdgePropertyOp::create(
-                builder, builder.getUnknownLoc(), builder.getI64Type(),
-                ev, pv, builder.getStringAttr(m->getIdentifier2()->getname()));
-        } else {
-            llvm::outs() << "Error: Add Op2 Not Implemented.\n"; exit(0);
+            if (!mlir::isa<mlir::starplat::EdgeType>(ev.getType())) {
+                llvm::outs() << "Error: Type error in Min Func add op2.\n";
+                exit(0);
+            }
+            op2 = mlir::starplat::GetEdgePropertyOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), ev, pv,
+                                                            builder.getStringAttr(m->getIdentifier2()->getname()));
+        }
+        else {
+            llvm::outs() << "Error: Add Op2 Not Implemented.\n";
+            exit(0);
         }
 
-        rhsValue2Op = mlir::starplat::AddOp::create(
-            builder, builder.getUnknownLoc(), builder.getI64Type(),
-            op1->getResult(0), op2->getResult(0));
-    } else {
-        llvm::outs() << "Error: Not implemented @ Tuple Assignment.\n"; return;
+        rhsValue2Op = mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), op1->getResult(0), op2->getResult(0));
+    }
+    else {
+        llvm::outs() << "Error: Not implemented @ Tuple Assignment.\n";
+        return;
     }
 
     // ---- RHS2: updateValue (e.g. True) ----
     if (rhsexpr2->getKind() == ExpressionKind::KIND_KEYWORD) {
         const Keyword* rhsKeyword = static_cast<const Keyword*>(rhsexpr2->getExpression());
-        updateValue = globalLookupOp(rhsKeyword->getKeyword());
+        updateValue               = globalLookupOp(rhsKeyword->getKeyword());
         if (!updateValue) {
-            llvm::outs() << "Error: Keyword not found in symbol table.\n"; exit(0);
+            llvm::outs() << "Error: Keyword not found in symbol table.\n";
+            exit(0);
         }
-    } else {
-        llvm::outs() << "Error: Expected keyword for updateValue.\n"; return;
+    }
+    else {
+        llvm::outs() << "Error: Expected keyword for updateValue.\n";
+        return;
     }
 
     // ---- Create the MinOp with all 7 operands ----
-    mlir::starplat::MinOp::create(builder, builder.getUnknownLoc(),
-        lhsNode1, lhsProp1,                  // write target 1
-        lhsNode2, lhsProp2,                  // write target 2
-        rhsValue1Op->getResult(0),           // current value (nbr.dist)
-        rhsValue2Op->getResult(0),           // new value (v.dist + e.weight)
-        updateValue);                         // side value (True)
+    mlir::starplat::MinOp::create(builder, builder.getUnknownLoc(), lhsNode1, lhsProp1, // write target 1
+                                  lhsNode2, lhsProp2,                                   // write target 2
+                                  rhsValue1Op->getResult(0),                            // current value (nbr.dist)
+                                  rhsValue2Op->getResult(0),                            // new value (v.dist + e.weight)
+                                  updateValue);                                         // side value (True)
 }
 
 void StarPlatCodeGen::visitAdd(const Add* add, mlir::SymbolTable* symbolTable) {}
@@ -1016,14 +1043,14 @@ void StarPlatCodeGen::visitFunction(const Function* function, mlir::SymbolTable*
             llvm::StringRef graphId = arg->getTemplateType()->getGraphName()->getname();
 
             if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propNode") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
+                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }
             else if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propEdge") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(mlir::starplat::SPIntType::get(builder.getContext()), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
+                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }
@@ -1170,9 +1197,9 @@ void StarPlatCodeGen::visitInitialiseAssignmentStmt(const InitialiseAssignmentSt
     else if (strcmp(type->getType(), "edge") == 0)
         typeAttr = mlir::starplat::EdgeType::get(builder.getContext());
 
-    auto idDecl       = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), typeAttr, builder.getStringAttr(identifier->getname()),
-                                                          builder.getStringAttr("public"));
-    lhs               = idDecl.getResult();
+    auto idDecl = mlir::starplat::DeclareOp2::create(builder, builder.getUnknownLoc(), typeAttr, builder.getStringAttr(identifier->getname()),
+                                                     builder.getStringAttr("public"));
+    lhs         = idDecl.getResult();
 
     symbolTable->insert(idDecl);
 
