@@ -19,6 +19,9 @@
 "Node"                  {yylval.id = strdup(yytext); return NODE;}
 "int"                   {yylval.id = strdup(yytext); return INT;}
 "bool"                  {yylval.id = strdup(yytext); return BOOL;}
+"float"                 {yylval.id = strdup(yytext); return FLOAT; }
+"do"                    {yylval.id = strdup(yytext); return DO; }
+"while"                 {yylval.id = strdup(yytext); return WHILE; }
 "propNode"              {yylval.id = strdup(yytext); return PROPNODE; }
 "propEdge"              {yylval.id = strdup(yytext); return PROPEDGE; }
 "False"                 {yylval.id = strdup(yytext); return FALSE; }
@@ -46,6 +49,11 @@
 "=="                    {return EQUALS;}
 "+"                     {return PLUS;}
 "!"                     {return NOT;}
+"-"                     {return MINUS;}
+"*"                     {return TIMES;}
+"/"                     {return DIVIDE;}
+"&&"                    {return AND;}
+"||"                    {return OR;}
 
 [ \t\n]+                ;
 #.*                    { /* Ignore single-line comments */ }
