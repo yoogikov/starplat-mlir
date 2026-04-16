@@ -250,7 +250,7 @@ param : expr                    {       Expression *expr = static_cast<Expressio
 
                                         if(expr->getKind() == KIND_IDENTIFIER) {
                                                 const Identifier *identifier = static_cast<const Identifier *>(expr->getExpression());
-                                                printf("Param: %s\n", identifier->getname());
+                                                // printf("Param: %s\n", identifier->getname());
                                         }
                                                 
                                 }

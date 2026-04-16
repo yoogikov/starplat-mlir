@@ -1,11 +1,18 @@
+# function Compute_TC(){
 function Compute_TC(Graph g) {
 int triangle_count=0;
 # triangle_count = triangle_count + 1;
 # triangle_count += 1;
 # triangle_count=0;
 forall(v in g.nodes()) {
-# int triangle_count;
+# triangle_count+=1;
+# # int triangle_count;
   forall(u in g.neighbors(v).filter(u < v)) {
+  # forall(u in g.neighbors(v)) {
+  # triangle_count+=1;
+    #   if (g.is_an_edge(u, v)) {
+    # triangle_count+=1;
+    # }
     forall(w in g.neighbors(v).filter(w > v)) {
       if (g.is_an_edge(u, w)) {
         triangle_count += 1;
@@ -14,5 +21,31 @@ forall(v in g.nodes()) {
   }
 }
   return triangle_count;
-  # return 0;
+  # return ;
 }
+
+# function foo(Graph g, propNode<int,g> dist, propEdge<int,g> weight, Node src)
+# {
+#     #
+#     propNode <int,g> modified_nxt;
+#     propNode <int,g> modified;
+#     # g.attachNodeProperty(modified = True, dist = INF, modified_nxt = True );
+#     g.attachNodeProperty(dist=INF, modified = False, modified_nxt = False );
+#     #
+#     src.dist=0;
+#     int finished = False;
+#     src.modified = True; 
+#     #
+#     # fixedPoint until (finished:!modified) {
+#     #   forall (v in g.nodes().filter(modified == True)) {
+#     #     forall (nbr in g.neighbors(v)) {          
+#     #       edge e = g.get_edge(v, nbr);
+#     #       <nbr.dist,nbr.modified_nxt> = <Min (nbr.dist, v.dist + e.weight), True>;
+#     #
+#     #     }
+#     #   }  
+#     #   modified = modified_nxt;
+#     #   g.attachNodeProperty(modified_nxt = False);
+#     # }
+#     #
+# }
