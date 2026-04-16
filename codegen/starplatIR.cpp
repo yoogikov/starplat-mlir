@@ -421,51 +421,46 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     bool isNeighbours  = false;
     bool hasFilter     = false;
     bool lhsIsLoopVar  = false;
+    bool rhsIsLoopVar  = false;
     mlir::Value graphSymbol;
     mlir::Value nodeSymbol;
-    mlir::Value rhsFilterSymbol;
-    mlir::Value lhsFilterSymbol;
-    mlir::Value lhsNodeVal;
     mlir::Value lhsPropVal;
     std::string filterOp;
     std::string lhsPropName;
+    std::string lhsFilterName;
+    std::string rhsFilterName;
     ExpressionKind lhsExprKind = ExpressionKind::KIND_IDENTIFIER;
 
     mlir::Type nodeType = mlir::starplat::NodeType::get(builder.getContext());
-
-    // Pre-register loop var as null so filter parsing can find it by name
-    nameToArgMap[loopVar->getname()] = mlir::Value();
 
     // ---- CHAINED: g.nodes().filter(...) or g.neighbors(v).filter(...) ----
     if (memberaccess->getMemberAccessNode()) {
         const Memberaccess* inner     = static_cast<const Memberaccess*>(memberaccess->getMemberAccessNode());
         const Methodcall* innerMethod = static_cast<const Methodcall*>(inner->getMethodCall());
 
-        graphSymbol                   = globalLookupOp(inner->getIdentifier()->getname());
+        graphSymbol = globalLookupOp(inner->getIdentifier()->getname());
         if (!graphSymbol) {
             llvm::outs() << "Error: Graph not found.\n";
             return;
         }
 
         if (strcmp(innerMethod->getIdentifier()->getname(), "neighbors") == 0) {
-            isNeighbours                = true;
+            isNeighbours = true;
             const Expression* paramExpr = static_cast<const Expression*>(innerMethod->getParamLists());
             const Identifier* paramId   = static_cast<const Identifier*>(paramExpr->getExpression());
-            nodeSymbol                  = globalLookupOp(paramId->getname());
+            nodeSymbol = globalLookupOp(paramId->getname());
             if (!nodeSymbol) {
                 llvm::outs() << "Error: Node '" << paramId->getname() << "' not found.\n";
                 return;
             }
-        }
-        else if (strcmp(innerMethod->getIdentifier()->getname(), "nodes") == 0) {
+        } else if (strcmp(innerMethod->getIdentifier()->getname(), "nodes") == 0) {
             isNeighbours = false;
-        }
-        else {
+        } else {
             llvm::outs() << "Error: Unknown method '" << innerMethod->getIdentifier()->getname() << "'.\n";
             return;
         }
 
-        // Check for filter
+        // Check for filter — only store names, resolve after block creation
         if (outermethodcall && outermethodcall->getIsBuiltin() &&
             strcmp(outermethodcall->getIdentifier()->getname(), "filter") == 0) {
             hasFilter = true;
@@ -491,26 +486,17 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
                     llvm::outs() << "Error: Undefined property '" << propId->getname() << "' in filter.\n";
                     return;
                 }
-                // Check if node is the loop var
                 if (strcmp(nodeId->getname(), loopVar->getname()) == 0) {
-                    lhsIsLoopVar = true; // node val filled after block creation
+                    lhsIsLoopVar = true;
                 } else {
-                    lhsNodeVal = globalLookupOp(nodeId->getname());
-                    if (!lhsNodeVal) {
-                        llvm::outs() << "Error: Undefined node '" << nodeId->getname() << "' in filter.\n";
-                        return;
-                    }
+                    lhsFilterName = nodeId->getname();
                 }
             } else if (lhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* lhsId = static_cast<const Identifier*>(lhsExpr->getExpression());
                 if (strcmp(lhsId->getname(), loopVar->getname()) == 0) {
-                    lhsIsLoopVar = true; // filled after block creation
+                    lhsIsLoopVar = true;
                 } else {
-                    lhsFilterSymbol = globalLookupOp(lhsId->getname());
-                    if (!lhsFilterSymbol) {
-                        llvm::outs() << "Error: Undefined identifier '" << lhsId->getname() << "' in filter.\n";
-                        return;
-                    }
+                    lhsFilterName = lhsId->getname();
                 }
             } else {
                 llvm::outs() << "Error: Unsupported filter LHS expression.\n";
@@ -520,22 +506,14 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
             // RHS
             if (rhsExpr->getKind() == ExpressionKind::KIND_IDENTIFIER) {
                 const Identifier* rhsId = static_cast<const Identifier*>(rhsExpr->getExpression());
-                rhsFilterSymbol = globalLookupOp(rhsId->getname());
-                if (!rhsFilterSymbol) {
-                    llvm::outs() << "Error: Undefined identifier '" << rhsId->getname() << "' in filter.\n";
-                    return;
+                if (strcmp(rhsId->getname(), loopVar->getname()) == 0) {
+                    rhsIsLoopVar = true;
+                } else {
+                    rhsFilterName = rhsId->getname();
                 }
             } else if (rhsExpr->getKind() == ExpressionKind::KIND_KEYWORD) {
                 const Keyword* rhsKw = static_cast<const Keyword*>(rhsExpr->getExpression());
-                rhsFilterSymbol = globalLookupOp(rhsKw->getKeyword());
-                if (!rhsFilterSymbol) {
-                    rhsKw->Accept(this, symbolTable);
-                    rhsFilterSymbol = globalLookupOp(rhsKw->getKeyword());
-                }
-                if (!rhsFilterSymbol) {
-                    llvm::outs() << "Error: Undefined keyword '" << rhsKw->getKeyword() << "' in filter.\n";
-                    return;
-                }
+                rhsFilterName = rhsKw->getKeyword();
             } else {
                 llvm::outs() << "Error: Unsupported filter RHS expression.\n";
                 return;
@@ -547,7 +525,7 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     else if (memberaccess->getMethodCall()) {
         const Methodcall* method = static_cast<const Methodcall*>(memberaccess->getMethodCall());
 
-        graphSymbol              = globalLookupOp(memberaccess->getIdentifier()->getname());
+        graphSymbol = globalLookupOp(memberaccess->getIdentifier()->getname());
         if (!graphSymbol) {
             llvm::outs() << "Error: Graph not found.\n";
             return;
@@ -555,18 +533,16 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
 
         if (strcmp(method->getIdentifier()->getname(), "nodes") == 0) {
             isNeighbours = false;
-        }
-        else if (strcmp(method->getIdentifier()->getname(), "neighbors") == 0) {
-            isNeighbours                = true;
+        } else if (strcmp(method->getIdentifier()->getname(), "neighbors") == 0) {
+            isNeighbours = true;
             const Expression* paramExpr = static_cast<const Expression*>(method->getParamLists());
             const Identifier* paramId   = static_cast<const Identifier*>(paramExpr->getExpression());
-            nodeSymbol                  = globalLookupOp(paramId->getname());
+            nodeSymbol = globalLookupOp(paramId->getname());
             if (!nodeSymbol) {
                 llvm::outs() << "Error: Node '" << paramId->getname() << "' not found.\n";
                 return;
             }
-        }
-        else {
+        } else {
             llvm::outs() << "Error: Unknown method '" << method->getIdentifier()->getname() << "'.\n";
             return;
         }
@@ -585,11 +561,10 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     }
 
     // ---- Set up the body ----
-    auto& loopBlock = (isNeighbours ? llvm::cast<mlir::starplat::ForAllNeighboursOp>(loopOp).getBody()
-                                    : llvm::cast<mlir::starplat::ForAllNodesOp>(loopOp).getBody())
-                          .emplaceBlock();
+    auto& loopBlock = (isNeighbours ?
+        llvm::cast<mlir::starplat::ForAllNeighboursOp>(loopOp).getBody() :
+        llvm::cast<mlir::starplat::ForAllNodesOp>(loopOp).getBody()).emplaceBlock();
 
-    // Add loop var as block argument and overwrite the null placeholder
     loopBlock.addArgument(nodeType, builder.getUnknownLoc());
     nameToArgMap[loopVar->getname()] = loopBlock.getArgument(0);
 
@@ -599,26 +574,49 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     symbolTables.push_back(&forAllSymbolTable);
 
     if (hasFilter) {
-        // lhsIsLoopVar handled — if memberaccess node was loop var, use block arg
-        mlir::Value lhsVal;
-        mlir::Type propElemType = builder.getI64Type(); // default
-        if (auto propNodeType = mlir::dyn_cast<mlir::starplat::PropNodeType>(lhsPropVal.getType()))
-            propElemType = propNodeType.getParameter();
+        // ---- Resolve filter symbols ----
+        mlir::Value lhsFilterSymbol;
+        mlir::Value rhsFilterSymbol;
+
+        // Resolve LHS
         if (lhsExprKind == ExpressionKind::KIND_MEMBERACCESS) {
-            mlir::Value nodeVal = lhsIsLoopVar ? loopBlock.getArgument(0) : lhsNodeVal;
-            lhsVal = mlir::starplat::GetNodePropertyOp::create(
+            mlir::Value nodeVal = lhsIsLoopVar ? loopBlock.getArgument(0) : globalLookupOp(lhsFilterName);
+            if (!nodeVal) {
+                llvm::outs() << "Error: Undefined node '" << lhsFilterName << "' in filter.\n";
+                return;
+            }
+            mlir::Type propElemType = builder.getI64Type();
+            if (auto propNodeType = mlir::dyn_cast<mlir::starplat::PropNodeType>(lhsPropVal.getType()))
+                propElemType = propNodeType.getParameter();
+            lhsFilterSymbol = mlir::starplat::GetNodePropertyOp::create(
                 builder, builder.getUnknownLoc(), propElemType,
                 nodeVal, lhsPropVal,
                 builder.getStringAttr(lhsPropName))->getResult(0);
         } else if (lhsIsLoopVar) {
-            lhsVal = loopBlock.getArgument(0);
+            lhsFilterSymbol = loopBlock.getArgument(0);
         } else {
-            lhsVal = lhsFilterSymbol;
+            lhsFilterSymbol = globalLookupOp(lhsFilterName);
+            if (!lhsFilterSymbol) {
+                llvm::outs() << "Error: Undefined identifier '" << lhsFilterName << "' in filter.\n";
+                return;
+            }
         }
 
+        // Resolve RHS
+        if (rhsIsLoopVar) {
+            rhsFilterSymbol = loopBlock.getArgument(0);
+        } else {
+            rhsFilterSymbol = globalLookupOp(rhsFilterName);
+            if (!rhsFilterSymbol) {
+                llvm::outs() << "Error: Undefined identifier '" << rhsFilterName << "' in filter.\n";
+                return;
+            }
+        }
+
+        // ---- Emit filter cmp + spif ----
         auto cmpOp = mlir::starplat::CmpOp::create(builder, builder.getUnknownLoc(),
                                                     mlir::IntegerType::get(builder.getContext(), 1),
-                                                    lhsVal, rhsFilterSymbol,
+                                                    lhsFilterSymbol, rhsFilterSymbol,
                                                     builder.getStringAttr(filterOp));
 
         auto ifOp = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(),
@@ -626,11 +624,12 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
                                                           builder.getStringAttr("spif"));
         auto& ifBlock = ifOp.getBody().emplaceBlock();
         builder.setInsertionPointToStart(&ifBlock);
+
         stmtlist->Accept(this, &forAllSymbolTable);
+
         mlir::starplat::endOp::create(builder, builder.getUnknownLoc());
         builder.setInsertionPointAfter(ifOp);
-    }
-    else {
+    } else {
         stmtlist->Accept(this, &forAllSymbolTable);
     }
 
@@ -1335,6 +1334,7 @@ mlir::Value StarPlatCodeGen::globalLookupOp(llvm::StringRef name) {
 }
 
 mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTable* symbolTable) {
+    // llvm::outs() << "resolveExpr: kind = " << expr->getKind() << "\n";
     if (!expr) { llvm::outs() << "Error: null expression\n"; return nullptr; }
 
     switch (expr->getKind()) {
