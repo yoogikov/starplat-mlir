@@ -49,6 +49,11 @@
 "=="                    {return EQUALS;}
 "+"                     {return PLUS;}
 "!"                     {return NOT;}
+"-"                     {return MINUS;}
+"*"                     {return TIMES;}
+"/"                     {return DIVIDE;}
+"&&"                    {return AND;}
+"||"                    {return OR;}
 
 [ \t\n]+                ;
 #.*                    { /* Ignore single-line comments */ }

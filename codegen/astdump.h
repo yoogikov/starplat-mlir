@@ -33,6 +33,16 @@ class CodeGen : public Visitor
 
     virtual void visitAdd(const Add* add) override;
 
+    virtual void visitSub(const Sub* sub) override;
+
+    virtual void visitMul(const Mul* mul) override;
+
+    virtual void visitDiv(const Div* div) override;
+
+    virtual void visitAnd(const And* _and) override;
+
+    virtual void visitOr(const Or* _or) override;
+
     virtual void visitMemberaccessStmt(const MemberacceessStmt* memberAccess) override;
 
     virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement* templateDeclStmt) override;

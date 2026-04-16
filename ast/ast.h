@@ -17,7 +17,7 @@ class ASTNode
     virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const = 0;
 };
 
-enum ExpressionKind { KIND_NUMBER, KIND_IDENTIFIER, KIND_KEYWORD, KIND_BOOLEXPR, KIND_MEMBERACCESS, KIND_METHODCALL, KIND_ADDOP };
+enum ExpressionKind { KIND_NUMBER, KIND_IDENTIFIER, KIND_KEYWORD, KIND_BOOLEXPR, KIND_MEMBERACCESS, KIND_METHODCALL, KIND_ADDOP, KIND_SUBOP, KIND_MULOP, KIND_DIVOP, KIND_ANDOP, KIND_OROP };
 
 class Identifier : public ASTNode
 {
@@ -380,6 +380,101 @@ class Add : public ASTNode
     virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
 
     ~Add();
+
+    ASTNode* getOperand1() const;
+    ASTNode* getOperand2() const;
+
+  private:
+    ASTNode* operand1_;
+    ASTNode* operand2_;
+};
+
+class Sub : public ASTNode
+{
+  public:
+    Sub(ASTNode* operand1, ASTNode* operand2);
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~Sub();
+
+    ASTNode* getOperand1() const;
+    ASTNode* getOperand2() const;
+
+  private:
+    ASTNode* operand1_;
+    ASTNode* operand2_;
+};
+
+class Mul : public ASTNode
+{
+  public:
+    Mul(ASTNode* operand1, ASTNode* operand2);
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~Mul();
+
+    ASTNode* getOperand1() const;
+    ASTNode* getOperand2() const;
+
+  private:
+    ASTNode* operand1_;
+    ASTNode* operand2_;
+};
+
+class Div : public ASTNode
+{
+  public:
+    Div(ASTNode* operand1, ASTNode* operand2);
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~Div();
+
+    ASTNode* getOperand1() const;
+    ASTNode* getOperand2() const;
+
+  private:
+    ASTNode* operand1_;
+    ASTNode* operand2_;
+};
+
+class And : public ASTNode
+{
+  public:
+    And(ASTNode* operand1, ASTNode* operand2);
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~And();
+
+    ASTNode* getOperand1() const;
+    ASTNode* getOperand2() const;
+
+  private:
+    ASTNode* operand1_;
+    ASTNode* operand2_;
+};
+
+class Or : public ASTNode
+{
+  public:
+    Or(ASTNode* operand1, ASTNode* operand2);
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~Or();
 
     ASTNode* getOperand1() const;
     ASTNode* getOperand2() const;

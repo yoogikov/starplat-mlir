@@ -18,11 +18,11 @@
 
 
 %token<id> FUNCTION LPAREN RPAREN LCURLY RCURLY RETURN IDENTIFIER ASGN NUMBER LTxx GT FORALL FOR EQUALS EDGE NODE
-%token<id> INT IF SEMICLN DOT IN COMMA EQUAL GRAPH PLUSEQUAL PROPNODE PROPEDGE FALSE INF FIXEDPOINT UNTIL COLON PLUS TRUE NOT BOOL FLOAT DO WHILE
+%token<id> INT IF SEMICLN DOT IN COMMA EQUAL GRAPH PLUSEQUAL PROPNODE PROPEDGE FALSE INF FIXEDPOINT UNTIL COLON PLUS TRUE NOT BOOL FLOAT DO WHILE MINUS TIMES DIVIDE AND OR
 
 %type<astNode>  methodcall memberaccess expr type paramlist arglist arg function boolexpr declarationstmt stmt 
 stmtlist ifstmt forstmt returnstmt forallstmt dowhileStmt incandassignstmt assignment initializestmt fixedPointStmt tuppleAssignmentstmt memberaccessstmt assignmentStmt
-addExpr properties templateType templateDecl paramAssignment param memberaccessAssignment KEYWORDS 
+addExpr properties templateType templateDecl paramAssignment param memberaccessAssignment KEYWORDS subExpr mulExpr divExpr andExpr orExpr
 
 
 %%
@@ -118,7 +118,7 @@ fixedPointStmt : FIXEDPOINT UNTIL LPAREN IDENTIFIER COLON expr RPAREN LCURLY stm
 
 tuppleAssignmentstmt : LTxx expr COMMA expr GT EQUAL LTxx expr COMMA expr GT SEMICLN               {$$ = new TupleAssignment($2, $4, $8, $10);}
 
-dowhileStmt : DO LCURLY stmtlist RCURLY WHILE LPAREN boolexpr RPAREN SEMICLN               {$$ = new DoWhileStatement($7, $3);}
+dowhileStmt : DO LCURLY stmtlist RCURLY WHILE LPAREN expr RPAREN SEMICLN               {$$ = new DoWhileStatement($7, $3);}
 
 boolexpr : expr LTxx expr 		{$$ = new BoolExpr($1, strdup("<"), $3);}
 
@@ -148,9 +148,25 @@ expr :  IDENTIFIER              {$$ = new Expression( new Identifier($1), KIND_I
      |  KEYWORDS                {$$ = new Expression ($1, KIND_KEYWORD);}
      |  methodcall              {$$ = new Expression ($1, KIND_METHODCALL);}
      |  addExpr                 {$$ = new Expression ($1, KIND_ADDOP);}
+     |  subExpr                 {$$ = new Expression ($1, KIND_SUBOP);}
+     |  mulExpr                 {$$ = new Expression ($1, KIND_MULOP);}
+     |  divExpr                 {$$ = new Expression ($1, KIND_DIVOP);}
+     |  andExpr                 {$$ = new Expression ($1, KIND_ANDOP);}
+     |  orExpr                  {$$ = new Expression ($1, KIND_OROP);}
+     |  LPAREN expr RPAREN      {$$ = $2;}       
      ;
 
 addExpr : expr PLUS expr      {$$ = new Add($1, $3);}
+
+subExpr : expr MINUS expr      {$$ = new Sub($1, $3);}
+
+mulExpr : expr TIMES expr      {$$ = new Mul($1, $3);}
+
+divExpr : expr DIVIDE expr      {$$ = new Div($1, $3);}
+
+andExpr : expr AND expr      {$$ = new And($1, $3);}
+
+orExpr : expr OR expr      {$$ = new Or($1, $3);}
 
 incandassignstmt : IDENTIFIER PLUSEQUAL expr SEMICLN  {
                                                         Identifier* identifier = new Identifier($1);

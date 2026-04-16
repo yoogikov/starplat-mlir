@@ -282,6 +282,24 @@ def GetEdgePropertyOp : StarplatBaseOp<"getEdgeProperty">
     let regions = (region AnyRegion:$body);
  }
 
+ def DoWhileOp : StarplatBaseOp<"dowhile", [SymbolTable, Symbol]>
+ {
+  let summary = "DoWhile loop";
+  let description = [{"Do While Loop"}];
+
+  let arguments = ( ins
+                    SymbolNameAttr:$sym_name
+                  );
+
+  let regions = (region AnyRegion:$body);
+ }
+
+ def DoWhileCondOp : StarplatBaseOp<"dowhile_cond", [Terminator]>
+{
+    let summary = "DoWhile condition terminator";
+    let arguments = (ins I1:$condition);
+}
+
 def ForAllNodesOp : StarplatBaseOp<"forallnodes", [SymbolTable, Symbol]>
 {
     let summary = "ForAll over all nodes in a graph";
@@ -374,6 +392,81 @@ def MinOp : StarplatBaseOp<"min">
  def AddOp : StarplatBaseOp<"add">
  {
   let summary = "Add Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def SubOp : StarplatBaseOp<"sub">
+ {
+  let summary = "Sub Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def MulOp : StarplatBaseOp<"mul">
+ {
+  let summary = "Mul Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def DivOp : StarplatBaseOp<"div">
+ {
+  let summary = "Div Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def AndOp : StarplatBaseOp<"and">
+ {
+  let summary = "And Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def OrOp : StarplatBaseOp<"or">
+ {
+  let summary = "Or Op";
 
   let arguments = (
                     ins 
