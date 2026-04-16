@@ -601,10 +601,13 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
     if (hasFilter) {
         // lhsIsLoopVar handled — if memberaccess node was loop var, use block arg
         mlir::Value lhsVal;
+        mlir::Type propElemType = builder.getI64Type(); // default
+        if (auto propNodeType = mlir::dyn_cast<mlir::starplat::PropNodeType>(lhsPropVal.getType()))
+            propElemType = propNodeType.getParameter();
         if (lhsExprKind == ExpressionKind::KIND_MEMBERACCESS) {
             mlir::Value nodeVal = lhsIsLoopVar ? loopBlock.getArgument(0) : lhsNodeVal;
             lhsVal = mlir::starplat::GetNodePropertyOp::create(
-                builder, builder.getUnknownLoc(), builder.getI64Type(),
+                builder, builder.getUnknownLoc(), propElemType,
                 nodeVal, lhsPropVal,
                 builder.getStringAttr(lhsPropName))->getResult(0);
         } else if (lhsIsLoopVar) {
