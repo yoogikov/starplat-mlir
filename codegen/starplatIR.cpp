@@ -975,8 +975,8 @@ void StarPlatCodeGen::visitFunction(const Function* function, mlir::SymbolTable*
                 ::mlir::TypeAttr::get(type);
             }
             else if (std::string(arg->getTemplateType()->getGraphPropNode()->getPropertyType()) == "propEdge") {
-                argTypes.push_back(builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId));
-                auto type = builder.getType<mlir::starplat::PropNodeType>(builder.getI64Type(), graphId);
+                argTypes.push_back(builder.getType<mlir::starplat::PropEdgeType>(builder.getI64Type(), graphId));
+                auto type = builder.getType<mlir::starplat::PropEdgeType>(builder.getI64Type(), graphId);
                 // auto typeAttr =
                 ::mlir::TypeAttr::get(type);
             }
