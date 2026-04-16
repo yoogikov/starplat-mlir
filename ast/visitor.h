@@ -18,6 +18,11 @@ class ReturnStmt;
 class Function;
 class Param;
 class Add;
+class Sub;
+class Mul;
+class Div;
+class And;
+class Or;
 class Paramlist;
 class Arglist;
 class Arg;
@@ -35,6 +40,7 @@ class Expression;
 class Methodcall;
 class Memberaccess;
 class MemberacceessStmt;
+class DoWhileStatement;
 
 
 class Visitor
@@ -45,6 +51,7 @@ class Visitor
         virtual void visitDeclarationStmt(const DeclarationStatement *declStmt) = 0;
         virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement *templatedeclStmt) = 0;
         virtual void visitForallStmt(const ForallStatement *forAllStmt) = 0;
+        virtual void visitDoWhileStmt(const DoWhileStatement* doWhileStmt) = 0;
         virtual void visitIfStmt(const IfStatement *ifStmt) = 0;
         virtual void visitBoolExpr(const BoolExpr *boolExpr) = 0;
         virtual void visitIncandassignstmt(const Incandassignstmt *incandassignstmt) = 0;
@@ -66,6 +73,11 @@ class Visitor
         virtual void visitParameterAssignment(const ParameterAssignment *parameterAssignment) = 0;
         virtual void visitParam(const Param *param) = 0;
         virtual void visitAdd(const Add *add) = 0;
+        virtual void visitSub(const Sub *sub) = 0;
+        virtual void visitMul(const Mul *mul) = 0;
+        virtual void visitDiv(const Div *div) = 0;
+        virtual void visitAnd(const And *_and) = 0;
+        virtual void visitOr(const Or *_or) = 0;
         virtual void visitType(const TypeExpr *type) = 0;
         virtual void visitKeyword(const Keyword *keyword) = 0;
         virtual void visitGraphProperties(const GraphProperties *graphproperties) = 0;
@@ -85,6 +97,7 @@ class MLIRVisitor
         virtual void visitDeclarationStmt(const DeclarationStatement *declStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement *templatedeclStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitForallStmt(const ForallStatement *forAllStmt, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitDoWhileStmt(const DoWhileStatement *doWhileStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIfStmt(const IfStatement *ifStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitBoolExpr(const BoolExpr *boolExpr, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIncandassignstmt(const Incandassignstmt *incandassignstmt, mlir::SymbolTable *symbolTable) = 0;
@@ -106,6 +119,11 @@ class MLIRVisitor
         virtual void visitParameterAssignment(const ParameterAssignment *parameterAssignment, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitParam(const Param *param, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitAdd(const Add *add, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitSub(const Sub *sub, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitMul(const Mul *mul, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitDiv(const Div *div, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitAnd(const And *_and, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitOr(const Or *_or, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitType(const TypeExpr *type, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitKeyword(const Keyword *keyword, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitGraphProperties(const GraphProperties *graphproperties, mlir::SymbolTable *symbolTable) = 0;

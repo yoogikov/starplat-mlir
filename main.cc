@@ -73,11 +73,11 @@ int main(int argc, char* argv[]) {
 
     // printf("Parsing Complete\n");
 
-    // CodeGen* codegen = new CodeGen;
+    CodeGen* codegen = new CodeGen;
 
-    // if (root != nullptr)
-    //     // Accept(codegen) just dumps the AST
-    //     root->Accept(codegen);
+    if (root != nullptr)
+        // Accept(codegen) just dumps the AST
+        root->Accept(codegen);
 
     StarPlatCodeGen* starplatcodegen = new StarPlatCodeGen;
 
@@ -88,7 +88,7 @@ int main(int argc, char* argv[]) {
         exit(0);
     }
 
-    // starplatcodegen->print();
+    starplatcodegen->print();
 
     PassManager pm(starplatcodegen->getContext());
     pm.addPass(mlir::starplat::createConvertStarPlatIRToOMPPass());

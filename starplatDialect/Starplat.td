@@ -61,6 +61,11 @@ def StarPlatIntType: StarPlatDialectType<"SPInt", "spint">
   let summary = "StarPlay Int type";
 }
 
+def StarPlatFloatType: StarPlatDialectType<"SPFloat", "spfloat">
+{
+  let summary = "StarPlay Float type";
+}
+
 def PropNodeType : StarPlatDialectType<"PropNode", "propNode">{
   let summary = "Property of Node";
   let parameters = (ins "Type":$parameter, StringRefParameter<"Graph Identifier">:$graphId);
@@ -276,15 +281,37 @@ def GetEdgePropertyOp : StarplatBaseOp<"getEdgeProperty">
     
     let regions = (region AnyRegion:$body);
  }
+
+ def DoWhileOp : StarplatBaseOp<"dowhile", [SymbolTable, Symbol]>
+ {
+  let summary = "DoWhile loop";
+  let description = [{"Do While Loop"}];
+
+  let arguments = ( ins
+                    SymbolNameAttr:$sym_name
+                  );
+
+  let regions = (region AnyRegion:$body);
+ }
+
+ def DoWhileCondOp : StarplatBaseOp<"dowhile_cond", [Terminator]>
+{
+    let summary = "DoWhile condition terminator";
+    let arguments = (ins I1:$condition);
+}
+
 def ForAllNodesOp : StarplatBaseOp<"forallnodes", [SymbolTable, Symbol]>
 {
     let summary = "ForAll over all nodes in a graph";
     let arguments = (ins
         AnyType:$graph,
-        AnyType:$loopVar,
         SymbolNameAttr:$sym_name
     );
     let regions = (region AnyRegion:$body);
+    
+    let extraClassDeclaration = [{
+        BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
+    }];
 }
 
 def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", [SymbolTable, Symbol]>
@@ -293,10 +320,13 @@ def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", [SymbolTable, Symbol
     let arguments = (ins
         AnyType:$graph,
         AnyType:$node,
-        AnyType:$loopVar,
         SymbolNameAttr:$sym_name
     );
     let regions = (region AnyRegion:$body);
+
+    let extraClassDeclaration = [{
+        BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
+    }];
 }
 
 def NodeCmpOp : StarplatBaseOp<"nodecmp">
@@ -362,6 +392,81 @@ def MinOp : StarplatBaseOp<"min">
  def AddOp : StarplatBaseOp<"add">
  {
   let summary = "Add Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def SubOp : StarplatBaseOp<"sub">
+ {
+  let summary = "Sub Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def MulOp : StarplatBaseOp<"mul">
+ {
+  let summary = "Mul Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def DivOp : StarplatBaseOp<"div">
+ {
+  let summary = "Div Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def AndOp : StarplatBaseOp<"and">
+ {
+  let summary = "And Op";
+
+  let arguments = (
+                    ins 
+                    AnyType : $operand1,
+                    AnyType : $operand2
+  );
+
+  let results = ( outs 
+                   AnyType : $result
+                );
+ }
+
+ def OrOp : StarplatBaseOp<"or">
+ {
+  let summary = "Or Op";
 
   let arguments = (
                     ins 
