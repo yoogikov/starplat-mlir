@@ -43,7 +43,11 @@ class StarPlatTypeConverter : public TypeConverter
         addConversion([](starplat::PropNodeType type) -> std::optional<Type>
                       { // llvm::errs() << type.getGraphId();
                         // return type.getParameter();
-                          return MemRefType::get({ShapedType::kDynamic}, type.getParameter());
+                          Type elem = type.getParameter();
+                          // i1 propNodes get widened to i8 so atomic_rmw assign is legal.
+                          if (elem.isInteger(1))
+                              elem = IntegerType::get(type.getContext(), 8);
+                          return MemRefType::get({ShapedType::kDynamic}, elem);
                           // return MemRefType::get({ShapedType::kDynamic}, mlir::IntegerType());
                       });
         addConversion([](starplat::PropEdgeType type) -> std::optional<Type>
