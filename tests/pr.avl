@@ -1,7 +1,7 @@
 function ComputePageRank(Graph g, float beta, float delta, int maxIter, propNode<float, g> pageRank) {
     float numNodes = g.num_nodes();
     propNode<float,g> pageRankNext;
-    g.attachNodeProperty(pageRank = 1 / numNodes, pageRankNext = 0);
+    g.attachNodeProperty(pageRank = 1 / numNodes, pageRankNext = 0.0);
     int iterCount = 0;
     float diff;
     do {
@@ -22,4 +22,6 @@ function ComputePageRank(Graph g, float beta, float delta, int maxIter, propNode
         pageRank = pageRankNext;
         iterCount++;
     } while ((diff > beta) && (iterCount < maxIter));
+
+    return 0;
 }

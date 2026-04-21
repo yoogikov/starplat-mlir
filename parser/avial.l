@@ -13,6 +13,7 @@
 "function"              {return FUNCTION;}
 "return"                {return RETURN;}        
 "if"                    {return IF;}
+"else"                  {return ELSE;}
 "forall"                {return FORALL;}
 "for"                   {return FOR;}
 "Graph"                 {yylval.id = strdup(yytext); return GRAPH;}
@@ -40,6 +41,8 @@
 "<"                     {return LTxx;}
 ">"                     {return GT;}
 "="                     {return EQUAL;}
+"<="                    {return LTE;}
+">="                    {return GTE;}
 ";"                     {return SEMICLN;}
 "."                     {return DOT;}
 "in"                    {return IN;}
@@ -48,6 +51,7 @@
 ":"                     {return COLON;}
 "=="                    {return EQUALS;}
 "+"                     {return PLUS;}
+"++"                    {return INCREMENT;}
 "!"                     {return NOT;}
 "-"                     {return MINUS;}
 "*"                     {return TIMES;}
@@ -60,6 +64,7 @@
 
 [a-zA-Z_][a-zA-Z0-9_]*  {yylval.id = strdup(yytext); return IDENTIFIER;}
 [0-9]*                  {yylval.id = strdup(yytext); return NUMBER;}
+[0-9]*[.][0-9]*         {yylval.id = strdup(yytext); return DECIMAL;}
 
 %%
 

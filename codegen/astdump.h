@@ -51,13 +51,19 @@ class CodeGen : public Visitor
 
     virtual void visitForallStmt(const ForallStatement* forAllStmt) override;
 
+    virtual void visitForStmt(const ForStatement* forStmt) override;
+
     virtual void visitDoWhileStmt(const DoWhileStatement* doWhileStmt) override;
 
     virtual void visitIfStmt(const IfStatement* ifStmt) override;
 
+    virtual void visitIfElseStmt(const IfElseStatement* ifElseStmt) override;
+
     virtual void visitBoolExpr(const BoolExpr* boolExpr) override;
 
     virtual void visitIncandassignstmt(const Incandassignstmt* incandassignstmt) override;
+
+    virtual void visitIncstmt(const Incstmt* incstmt) override;
 
     virtual void visitAssignment(const Assignment* assignment) override;
 
