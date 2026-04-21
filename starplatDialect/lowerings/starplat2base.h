@@ -881,58 +881,44 @@ struct ForallNeighboursOpLowering : public OpConversionPattern<starplat::ForAllN
 struct ConvertAttachOp : public OpConversionPattern<mlir::starplat::AttachNodePropertyOp>
 {
     using OpConversionPattern::OpConversionPattern;
-
     LogicalResult matchAndRewrite(mlir::starplat::AttachNodePropertyOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        Location loc  = op.getLoc();
+        auto operands = adaptor.getOperands();
 
-        // auto retVal = LLVM::ConstantOp::create(rewriter, op.getLoc(), rewriter.getI32Type(), rewriter.getI32IntegerAttr(0));
-        // auto operand = adaptor.getOperands()[0];
-        //
-        // if (isa<LLVM::LLVMPointerType>(operand.getType())) {
-        //     auto loadOp1 = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), operand);
-        //     operand      = loadOp1.getResult();
-        // }
-        //
-        // LLVM::ReturnOp::create(rewriter, op.getLoc(), mlir::ValueRange({operand}));
+        // Operands layout: %0 (graph/node handle), then pairs of (%dst_memref, %fill_val)
+        // i.e. operands[1] filled with operands[2], operands[3] filled with operands[4], ...
+        // Start at index 1, step by 2: dst at i, fill at i+1
+        for (size_t i = 1; i + 1 < operands.size(); i += 2) {
+            Value memref  = operands[i];     // destination memref<?xT>
+            Value fillVal = operands[i + 1]; // fill value (may need widening/narrowing)
 
-        // auto loc = op.getLoc();
-        //
-        // auto fillop = linalg::FillOp::create(rewriter, loc, ValueRange{adaptor.getOperands()[2]}, ValueRange{op.getOperands()[1]});
-        //
-        // rewriter.replaceOp(op, fillop);
-        Location loc = op.getLoc();
+            auto memrefTy = dyn_cast<MemRefType>(memref.getType());
+            if (!memrefTy)
+                return rewriter.notifyMatchFailure(op, "expected memref type for destination operand");
 
-        // 1. Get the converted memref operand via adaptor
-        Value memref = adaptor.getOperands()[1]; // memref<?x...> (i8 if source prop was i1)
+            Type elemTy = memrefTy.getElementType();
 
-        // 2. Get the fill value — cast it to the memref's element type if needed
-        Value fillVal = adaptor.getOperands()[2]; // may be i1, i64, etc.
-
-        // If the fill value type doesn't match the memref element type, widen/narrow.
-        // This handles the i1 propNode -> memref<?xi8> case (type converter widens),
-        // where the fill constant is still i1 and needs zero-extension to i8.
-        Type elemTy = cast<MemRefType>(memref.getType()).getElementType();
-        if (fillVal.getType() != elemTy) {
-            auto fillIntTy = dyn_cast<IntegerType>(fillVal.getType());
-            auto elemIntTy = dyn_cast<IntegerType>(elemTy);
-            if (fillIntTy && elemIntTy) {
-                if (fillIntTy.getWidth() < elemIntTy.getWidth()) {
-                    fillVal = arith::ExtUIOp::create(rewriter, loc, elemTy, fillVal);
+            // Widen or narrow fill value to match memref element type if needed.
+            // Common case: i1 fill into memref<?xi8> after type conversion widens.
+            if (fillVal.getType() != elemTy) {
+                auto fillIntTy = dyn_cast<IntegerType>(fillVal.getType());
+                auto elemIntTy = dyn_cast<IntegerType>(elemTy);
+                if (fillIntTy && elemIntTy) {
+                    if (fillIntTy.getWidth() < elemIntTy.getWidth())
+                        fillVal = arith::ExtUIOp::create(rewriter, loc, elemTy, fillVal);
+                    else
+                        fillVal = arith::TruncIOp::create(rewriter, loc, elemTy, fillVal);
                 }
-                else if (fillIntTy.getWidth() > elemIntTy.getWidth()) {
-                    fillVal = arith::TruncIOp::create(rewriter, loc, elemTy, fillVal);
+                else {
+                    return rewriter.notifyMatchFailure(op, "attach fill value / memref element type mismatch (non-integer)");
                 }
             }
-            else {
-                return rewriter.notifyMatchFailure(op, "attach fill value / memref element type mismatch (non-integer)");
-            }
+
+            linalg::FillOp::create(rewriter, loc,
+                                   /*inputs=*/ValueRange{fillVal},
+                                   /*outputs=*/ValueRange{memref});
         }
 
-        // 4. Create linalg.fill
-        linalg::FillOp::create(rewriter, loc,
-                               /*inputs=*/ValueRange{fillVal},
-                               /*outputs=*/ValueRange{memref});
-
-        // 5. Erase the original op
         rewriter.eraseOp(op);
         return success();
     }
@@ -1266,6 +1252,7 @@ struct ConvertGetEdgeProperty : public OpConversionPattern<mlir::starplat::GetEd
 
         // Pull the converted edge operand. The propEdge operand is intentionally ignored.
         Value edgePtr = adaptor.getOperands()[0]; // !llvm.ptr
+        edgePtr       = LLVM::LoadOp::create(rewriter, loc, LLVM::LLVMPointerType::get(context), edgePtr);
 
         auto ptrTy    = LLVM::LLVMPointerType::get(context);
         auto i64Ty    = rewriter.getI64Type();
