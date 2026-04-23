@@ -16,6 +16,8 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/GPU/Transforms/ParallelLoopMapper.h" // for setMappingAttr
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -40,6 +42,7 @@
 //     return;
 // }
 
+static constexpr llvm::StringLiteral kInReductionAttr("__in_reduction__");
 inline mlir::LLVM::LLVMStructType createGraphStruct(mlir::MLIRContext* context) {
 
     auto structType = mlir::LLVM::LLVMStructType::getIdentified(context, "Graph");
@@ -472,22 +475,26 @@ struct ConvertGetEdge : public OpConversionPattern<mlir::starplat::GetEdgeOp>
     }
 };
 
-struct ForallNodesOpLowering : public OpConversionPattern<starplat::ForAllNodesOp>
+struct ForallNodesOpLoweringCPU : public OpConversionPattern<starplat::ForAllNodesOp>
 {
     using OpConversionPattern::OpConversionPattern;
 
     LogicalResult matchAndRewrite(starplat::ForAllNodesOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
-        auto loc        = op.getLoc();
-        auto* ctx       = rewriter.getContext();
-        ModuleOp module = op->getParentOfType<ModuleOp>();
+        auto loc          = op.getLoc();
+        auto* ctx         = rewriter.getContext();
+        ModuleOp module   = op->getParentOfType<ModuleOp>();
 
-        Value graphPtr  = adaptor.getOperands()[0]; // !llvm.ptr
+        Value graphPtr    = adaptor.getOperands()[0]; // !llvm.ptr
 
-        auto i32Ty      = rewriter.getI32Type();
-        auto idxTy      = rewriter.getIndexType();
-        auto ptrTy      = LLVM::LLVMPointerType::get(ctx);
+        auto i32Ty        = rewriter.getI32Type();
+        auto i64Ty        = rewriter.getI64Type();
+        auto idxTy        = rewriter.getIndexType();
+        auto ptrTy        = LLVM::LLVMPointerType::get(ctx);
 
-        // Declare + call get_num_nodes(ptr) -> i32
+        Region& srcRegion = op.getRegion();
+        Block& srcBlock   = srcRegion.front();
+
+        // ── N = get_num_nodes(graph) ──────────────────────────────────────
         FailureOr<LLVM::LLVMFuncOp> getNumNodesFn = LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
         if (failed(getNumNodesFn))
             return failure();
@@ -502,46 +509,100 @@ struct ForallNodesOpLowering : public OpConversionPattern<starplat::ForAllNodesO
         bool nestedInParallel = op->getParentOfType<scf::ParallelOp>() || op->getParentOfType<scf::ForallOp>();
 
         // Per-iteration: cast IV index -> i32, alloca an i32 slot, store, return ptr.
-        auto materializeNodePtr = [&](OpBuilder& b, Location l, Value iv) -> Value
+        // Returns {nodePtr, storeOp} so callers can splice the inlined body
+        // immediately after the store via ++storeOp->getIterator().
+        auto materializeNodePtr = [&](OpBuilder& b, Location l, Value iv)
+            -> std::pair<Value, LLVM::StoreOp>
         {
-            Value iI32 = arith::IndexCastOp::create(b, l, i32Ty, iv);
-            Value slot = LLVM::AllocaOp::create(b, l, ptrTy, i32Ty, oneI32,
-                                                /*alignment=*/0);
-            LLVM::StoreOp::create(b, l, iI32, slot);
-            return slot;
+            Value iI32          = arith::IndexCastOp::create(b, l, i32Ty, iv);
+            Value slot          = LLVM::AllocaOp::create(b, l, ptrTy, i32Ty, oneI32,
+                                                         /*alignment=*/0);
+            auto storeOp        = LLVM::StoreOp::create(b, l, iI32, slot);
+            return {slot, storeOp};
         };
 
-        Region& srcRegion = op.getRegion();
-        Block& srcBlock   = srcRegion.front();
-
+        // ── Sequential fallback (already inside a parallel context) ───────
         if (nestedInParallel) {
             auto forOp = scf::ForOp::create(rewriter, loc, zeroIdx, nIdx, oneIdx);
 
             OpBuilder::InsertionGuard g(rewriter);
             rewriter.setInsertionPointToStart(forOp.getBody());
 
-            Value nodePtr = materializeNodePtr(rewriter, loc, forOp.getInductionVar());
+            auto [nodePtr, storeOp] = materializeNodePtr(rewriter, loc, forOp.getInductionVar());
 
             auto endOp    = cast<starplat::endOp>(srcBlock.getTerminator());
             rewriter.eraseOp(endOp);
 
-            Block* dstBlock = forOp.getBody();
-            rewriter.inlineBlockBefore(&srcBlock, dstBlock->getTerminator(), ValueRange{nodePtr});
-        }
-        else {
-            auto parOp = scf::ParallelOp::create(rewriter, loc, ValueRange{zeroIdx}, ValueRange{nIdx}, ValueRange{oneIdx},
-                                                 /*initVals=*/ValueRange{});
+            // Inline the body immediately *after* the store. Use the four-arg
+            // overload with an explicit block + iterator to avoid dereferencing
+            // a potentially null getNextNode() when the store is the last op.
+            rewriter.inlineBlockBefore(&srcBlock, storeOp->getBlock(),
+                                       ++Block::iterator(storeOp), ValueRange{nodePtr});
 
+            rewriter.eraseOp(op);
+            return success();
+        }
+
+        // ── scf.parallel path (top-level, OMP-friendly) ───────────────────
+        //
+        // Step 1: find the single IncAndAssignOp guaranteed to be in the region.
+        //         Collect it *before* we start mutating anything.
+        starplat::IncAndAssignOp incAssignOp = nullptr;
+        srcRegion.walk(
+            [&](starplat::IncAndAssignOp iop)
+            {
+                incAssignOp = iop;
+                return WalkResult::interrupt(); // only one, stop early
+            });
+
+        // Step 2: load the initial value from the spint operand.
+        //
+        //   incAssignOp->getOperand(0) is the !starplat.spint (pre-conversion).
+        //   We ask the type converter for its lowered type (!llvm.ptr) and
+        //   insert an UnrealizedConversionCastOp so the framework can fold it
+        //   once the defining op is rewritten.  Then we do an i64 load.
+        Value initVal = nullptr;
+        if (incAssignOp) {
+            Value spintOperand = incAssignOp->getOperand(0); // !starplat.spint SSA val
+
+            // materialize as !llvm.ptr using the type converter
+            Value spintPtr = rewriter.getRemappedValue(spintOperand);
+
+            // Load the current i64 value — this becomes the reduction initial value.
+            initVal = LLVM::LoadOp::create(rewriter, loc, i64Ty, spintPtr);
+
+            // Mark the IncAndAssignOp so ConvertIncAndAssign knows to use scf.reduce.
+            // We do this on the *original* op before inlining so the attribute
+            // survives into the body block.
+            rewriter.modifyOpInPlace(incAssignOp, [&]() { incAssignOp->setAttr(kInReductionAttr, rewriter.getUnitAttr()); });
+        }
+
+        // Step 3: create scf.parallel, threading the initial value as a reduction
+        //         init if we have one.
+        SmallVector<Value> initVals;
+        if (initVal)
+            initVals.push_back(initVal);
+
+        auto parOp = scf::ParallelOp::create(rewriter, loc, ValueRange{zeroIdx}, // lowerBound
+                                             ValueRange{nIdx},                   // upperBound
+                                             ValueRange{oneIdx},                 // step
+                                             initVals);
+
+        // Step 4: populate the body.
+        {
             OpBuilder::InsertionGuard g(rewriter);
             rewriter.setInsertionPointToStart(parOp.getBody());
 
-            Value nodePtr = materializeNodePtr(rewriter, loc, parOp.getInductionVars()[0]);
+            auto [nodePtr, storeOp] = materializeNodePtr(rewriter, loc, parOp.getInductionVars()[0]);
 
             auto endOp    = cast<starplat::endOp>(srcBlock.getTerminator());
             rewriter.eraseOp(endOp);
 
-            Block* dstBlock = parOp.getBody();
-            rewriter.inlineBlockBefore(&srcBlock, dstBlock->getTerminator(), ValueRange{nodePtr});
+            // Inline the body immediately *after* the store. Use the four-arg
+            // overload with an explicit block + iterator to avoid dereferencing
+            // a potentially null getNextNode() when the store is the last op.
+            rewriter.inlineBlockBefore(&srcBlock, storeOp->getBlock(),
+                                       ++Block::iterator(storeOp), ValueRange{nodePtr});
         }
 
         rewriter.eraseOp(op);
@@ -705,29 +766,75 @@ struct ConvertIncAndAssign : public OpConversionPattern<mlir::starplat::IncAndAs
     using OpConversionPattern::OpConversionPattern;
 
     LogicalResult matchAndRewrite(mlir::starplat::IncAndAssignOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
-        auto loc      = op.getLoc();
-        auto operand1 = adaptor.getOperands()[0];
-        // operand1.getType().dump();
-        auto operand2 = adaptor.getOperands()[1];
+        auto loc   = op.getLoc();
+        auto i64Ty = rewriter.getI64Type();
 
-        // if (isa<LLVM::LLVMPointerType>(operand1.getType())) {
-        //     auto loadOp1 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand1);
-        //     operand1     = loadOp1.getResult();
-        // }
+        // operand[0] = spint ptr  (!llvm.ptr after conversion)
+        // operand[1] = rhs value  (i64, or !llvm.ptr wrapping one)
+        Value spintPtr = adaptor.getOperands()[0];
+        Value rhs      = adaptor.getOperands()[1];
 
-        if (isa<LLVM::LLVMPointerType>(operand2.getType())) {
-            auto loadOp2 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand2);
-            operand2     = loadOp2.getResult();
-        }
-        // operand2.getType().dump();
+        // Dereference rhs if it is still wrapped in a pointer.
+        if (isa<LLVM::LLVMPointerType>(rhs.getType()))
+            rhs = LLVM::LoadOp::create(rewriter, loc, i64Ty, rhs);
 
-        auto addOp = LLVM::AtomicRMWOp::create(rewriter, op.getLoc(), LLVM::AtomicBinOp::add, operand1, operand2, LLVM::AtomicOrdering::monotonic);
-        // adaptor.getOperand1();
-        // auto addOp = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), adaptor.getOperands()[0]);
+        // ── Reduction path ────────────────────────────────────────────────
         //
-        rewriter.replaceOp(op, addOp);
+        // scf.parallel reduction semantics (different from scf.for!):
+        //   • The body block has ONLY the IV args — no iter-args.
+        //   • Each iteration contributes a partial value by executing
+        //     scf.reduce(partialVal).  The scf.reduce op contains an inline
+        //     combiner region: (%lhs, %rhs) { yield lhs + rhs }.
+        //   • The runtime (or OMP lowering) combines all partial values with
+        //     that combiner, starting from the initVal seed passed to the
+        //     scf.parallel.
+        //   • The final result comes out as scf.parallel's SSA result.
+        //
+        // So the per-iteration contribution is simply `rhs` (the increment
+        // amount), not iterArg + rhs.  The combining is handled structurally.
+        if (op->hasAttr(kInReductionAttr)) {
+            auto parOp = op->getParentOfType<scf::ParallelOp>();
+            if (!parOp || parOp.getInitVals().empty())
+                return rewriter.notifyMatchFailure(op, "expected enclosing scf.parallel with initVals for reduction");
 
-        // rewriter.eraseOp(op);
+            // Emit scf.reduce(rhs) just before the body terminator.
+            // The combiner region inside scf.reduce performs the actual add.
+            Block* parBody = parOp.getBody();
+            rewriter.setInsertionPoint(parBody->getTerminator());
+
+            auto reduceOp = scf::ReduceOp::create(rewriter, loc, rhs);
+
+            // Build the combiner region: (%lhs : i64, %rhs : i64) -> i64
+            //   scf.reduce.return (arith.addi %lhs, %rhs)
+            //
+            // scf::ReduceOp::create already inserts an entry block with the
+            // two i64 combiner arguments into the region. We must reuse it and
+            // must NOT call addArgument — that would double the args to four.
+            Region& reductionRegion = reduceOp.getReductions().front();
+            Block*  combinerBlock   = &reductionRegion.front();
+            {
+                OpBuilder::InsertionGuard g(rewriter);
+                rewriter.setInsertionPointToStart(combinerBlock);
+                Value sum = arith::AddIOp::create(rewriter, loc, combinerBlock->getArgument(0), combinerBlock->getArgument(1));
+                scf::ReduceReturnOp::create(rewriter, loc, sum);
+            }
+
+            // After the parallel completes, store the final accumulated value
+            // back to the spint pointer so subsequent llvm.loads see it.
+            // parOp->getResult(0) is the single reduction output.
+            {
+                OpBuilder::InsertionGuard g(rewriter);
+                rewriter.setInsertionPointAfter(parOp);
+                LLVM::StoreOp::create(rewriter, loc, parOp->getResult(0), spintPtr);
+            }
+
+            rewriter.eraseOp(op);
+            return success();
+        }
+
+        // ── Fallback: atomicrmw (sequential / nested path) ────────────────
+        LLVM::AtomicRMWOp::create(rewriter, loc, LLVM::AtomicBinOp::add, spintPtr, rhs, LLVM::AtomicOrdering::monotonic);
+        rewriter.eraseOp(op);
         return success();
     }
 };
@@ -785,7 +892,154 @@ struct ConvertReturnOp : public OpConversionPattern<mlir::starplat::ReturnOp>
     }
 };
 
-struct ForallNeighboursOpLowering : public OpConversionPattern<starplat::ForAllNeighboursOp>
+struct ForallNodesOpLoweringGPU : public OpConversionPattern<starplat::ForAllNodesOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    // Block size (threads per block along thread_x). 256 is a sane default for
+    // vertex-parallel graph kernels; tune per-algorithm later if needed.
+    static constexpr int64_t kBlockSize = 256;
+
+    LogicalResult matchAndRewrite(starplat::ForAllNodesOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc        = op.getLoc();
+        auto* ctx       = rewriter.getContext();
+        ModuleOp module = op->getParentOfType<ModuleOp>();
+
+        Value graphPtr  = adaptor.getOperands()[0]; // !llvm.ptr
+
+        auto i32Ty      = rewriter.getI32Type();
+        auto idxTy      = rewriter.getIndexType();
+        auto ptrTy      = LLVM::LLVMPointerType::get(ctx);
+
+        // --- N = get_num_nodes(graph) ------------------------------------------------
+        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn = LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
+        if (failed(getNumNodesFn))
+            return failure();
+
+        Value nI32       = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
+        Value nIdx       = arith::IndexCastOp::create(rewriter, loc, idxTy, nI32);
+
+        Value zeroIdx    = arith::ConstantIndexOp::create(rewriter, loc, 0);
+        Value oneIdx     = arith::ConstantIndexOp::create(rewriter, loc, 1);
+        Value oneI32     = LLVM::ConstantOp::create(rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+        Value blockSzIdx = arith::ConstantIndexOp::create(rewriter, loc, kBlockSize);
+
+        // numBlocks = ceildiv(N, kBlockSize)
+        Value numBlocksIdx = arith::CeilDivUIOp::create(rewriter, loc, nIdx, blockSzIdx);
+
+        // If we're already inside a parallel region (outer scf.parallel / scf.forall
+        // / gpu.launch), degrade to a sequential scf.for — same rule as the CPU path,
+        // just now it also prevents nested kernel launches.
+        bool nestedInParallel =
+            op->getParentOfType<scf::ParallelOp>() || op->getParentOfType<scf::ForallOp>() || op->getParentOfType<gpu::LaunchOp>();
+
+        // Per-iteration: cast IV index -> i32, alloca an i32 slot, store, return ptr.
+        // Identical to the CPU lowering — the body still sees a !llvm.ptr node.
+        auto materializeNodePtr = [&](OpBuilder& b, Location l, Value iv) -> Value
+        {
+            Value iI32 = arith::IndexCastOp::create(b, l, i32Ty, iv);
+            Value slot = LLVM::AllocaOp::create(b, l, ptrTy, i32Ty, oneI32,
+                                                /*alignment=*/0);
+            LLVM::StoreOp::create(b, l, iI32, slot);
+            return slot;
+        };
+
+        Region& srcRegion = op.getRegion();
+        Block& srcBlock   = srcRegion.front();
+
+        if (nestedInParallel) {
+            // Sequential fallback — identical to CPU path.
+            auto forOp = scf::ForOp::create(rewriter, loc, zeroIdx, nIdx, oneIdx);
+
+            OpBuilder::InsertionGuard g(rewriter);
+            rewriter.setInsertionPointToStart(forOp.getBody());
+
+            Value nodePtr = materializeNodePtr(rewriter, loc, forOp.getInductionVar());
+
+            auto endOp    = cast<starplat::endOp>(srcBlock.getTerminator());
+            rewriter.eraseOp(endOp);
+
+            Block* dstBlock = forOp.getBody();
+            rewriter.inlineBlockBefore(&srcBlock, dstBlock->getTerminator(), ValueRange{nodePtr});
+        }
+        else {
+            // -----------------------------------------------------------------------
+            // GPU path: two nested scf.parallel loops tagged with #gpu.loop_dim_map
+            // so `-convert-parallel-loops-to-gpu` turns them into a gpu.launch with
+            // one block per tile and kBlockSize threads per block.
+            //
+            //   scf.parallel (b) in [0, numBlocks)        { mapping = block_x }
+            //     scf.parallel (t) in [0, kBlockSize)     { mapping = thread_x }
+            //       v = b * kBlockSize + t
+            //       if (v < N) { <body with nodePtr = &v> }
+            //
+            // This is the standard CUDA grid-stride tile. One logical parallel loop
+            // in StarPlat becomes two levels here purely because the hardware has a
+            // two-level execution hierarchy — the DSL doesn't need to know.
+            // -----------------------------------------------------------------------
+
+            // Outer (grid) loop over blocks.
+            auto blockLoop = scf::ParallelOp::create(rewriter, loc, ValueRange{zeroIdx}, ValueRange{numBlocksIdx}, ValueRange{oneIdx},
+                                                     /*initVals=*/ValueRange{});
+
+            // Attach #gpu.loop_dim_map<processor=block_x, map=(d0)->(d0), bound=(d0)->(d0)>
+            {
+                auto identityMap  = AffineMap::getMultiDimIdentityMap(1, ctx);
+                auto blockMapping = gpu::ParallelLoopDimMappingAttr::get(ctx, gpu::Processor::BlockX, identityMap, identityMap);
+                if (failed(gpu::setMappingAttr(blockLoop, ArrayRef<gpu::ParallelLoopDimMappingAttr>{blockMapping})))
+                    return rewriter.notifyMatchFailure(op, "failed to set block_x mapping");
+            }
+
+            {
+                OpBuilder::InsertionGuard gOuter(rewriter);
+                rewriter.setInsertionPointToStart(blockLoop.getBody());
+
+                // Inner (block) loop over threads.
+                auto threadLoop    = scf::ParallelOp::create(rewriter, loc, ValueRange{zeroIdx}, ValueRange{blockSzIdx}, ValueRange{oneIdx},
+                                                             /*initVals=*/ValueRange{});
+
+                auto identityMap   = AffineMap::getMultiDimIdentityMap(1, ctx);
+                auto threadMapping = gpu::ParallelLoopDimMappingAttr::get(ctx, gpu::Processor::ThreadX, identityMap, identityMap);
+                if (failed(gpu::setMappingAttr(threadLoop, ArrayRef<gpu::ParallelLoopDimMappingAttr>{threadMapping})))
+                    return rewriter.notifyMatchFailure(op, "failed to set thread_x mapping");
+
+                OpBuilder::InsertionGuard gInner(rewriter);
+                rewriter.setInsertionPointToStart(threadLoop.getBody());
+
+                Value bIv = blockLoop.getInductionVars()[0];
+                Value tIv = threadLoop.getInductionVars()[0];
+
+                // v = b * kBlockSize + t
+                Value bTimesBS = arith::MulIOp::create(rewriter, loc, bIv, blockSzIdx);
+                Value vIdx     = arith::AddIOp::create(rewriter, loc, bTimesBS, tIv);
+
+                // Tail guard: if (v < N) { body }
+                // Needed because numBlocks * kBlockSize rounds up past N.
+                Value inBounds = arith::CmpIOp::create(rewriter, loc, arith::CmpIPredicate::ult, vIdx, nIdx);
+
+                auto ifOp      = scf::IfOp::create(rewriter, loc, inBounds,
+                                                   /*withElseRegion=*/false);
+
+                OpBuilder::InsertionGuard gIf(rewriter);
+                rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+
+                Value nodePtr = materializeNodePtr(rewriter, loc, vIdx);
+
+                auto endOp    = cast<starplat::endOp>(srcBlock.getTerminator());
+                rewriter.eraseOp(endOp);
+
+                // Splice the original body into the `then` block, before its yield.
+                Block* thenBlock = &ifOp.getThenRegion().front();
+                rewriter.inlineBlockBefore(&srcBlock, thenBlock->getTerminator(), ValueRange{nodePtr});
+            }
+        }
+
+        rewriter.eraseOp(op);
+        return success();
+    }
+};
+
+struct ForallNeighboursOpLoweringCPU : public OpConversionPattern<starplat::ForAllNeighboursOp>
 {
     using OpConversionPattern::OpConversionPattern;
 
@@ -1073,7 +1327,7 @@ struct ConvertFixedPointUntil : public OpConversionPattern<mlir::starplat::Fixed
     LogicalResult matchAndRewrite(mlir::starplat::FixedPointUntilOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
         Location loc = op.getLoc();
 
-        Type i1Ty    = rewriter.getI1Type();
+        Type i8Ty    = rewriter.getI8Type();
         Type idxTy   = rewriter.getIndexType();
 
         // propNode<i1,"g"> -> memref<?xi1>
@@ -1099,7 +1353,7 @@ struct ConvertFixedPointUntil : public OpConversionPattern<mlir::starplat::Fixed
             }
 
             // --- OR-reduce propArray. ---
-            Value cFalse  = arith::ConstantOp::create(rewriter, loc, i1Ty, rewriter.getBoolAttr(false));
+            Value cFalse  = arith::ConstantOp::create(rewriter, loc, i8Ty, rewriter.getI8IntegerAttr(0));
             Value zeroIdx = arith::ConstantOp::create(rewriter, loc, idxTy, rewriter.getIndexAttr(0));
             Value oneIdx  = arith::ConstantOp::create(rewriter, loc, idxTy, rewriter.getIndexAttr(1));
             Value len     = memref::DimOp::create(rewriter, loc, propArray, zeroIdx);
@@ -1134,7 +1388,6 @@ struct ConvertFixedPointUntil : public OpConversionPattern<mlir::starplat::Fixed
             else {
                 // Parallel reduction via scf.parallel + scf.reduce.
                 // Load byte (i8) from propArray, narrow to i1 via (!= 0), then contribute to the OR reduction.
-                Value zeroI8    = arith::ConstantOp::create(rewriter, loc, rewriter.getI8Type(), rewriter.getI8IntegerAttr(0));
                 auto parallelOp = scf::ParallelOp::create(rewriter, loc,
                                                           /*lowerBounds=*/ValueRange{zeroIdx},
                                                           /*upperBounds=*/ValueRange{len},
@@ -1143,11 +1396,10 @@ struct ConvertFixedPointUntil : public OpConversionPattern<mlir::starplat::Fixed
                                                           [&](OpBuilder& b, Location l, ValueRange ivs, ValueRange /*initVals*/)
                                                           {
                                                               Value byte = memref::LoadOp::create(b, l, propArray, ivs);
-                                                              Value bit  = arith::CmpIOp::create(b, l, arith::CmpIPredicate::ne, byte, zeroI8);
 
                                                               // Emit scf.reduce contributing `bit`; its region
                                                               // defines the combiner (OR).
-                                                              auto reduceOp = scf::ReduceOp::create(b, l, ValueRange{bit});
+                                                              auto reduceOp = scf::ReduceOp::create(b, l, ValueRange{byte});
 
                                                               Block& rBlock = reduceOp.getReductions()[0].front();
                                                               OpBuilder::InsertionGuard g2(b);
@@ -1160,7 +1412,9 @@ struct ConvertFixedPointUntil : public OpConversionPattern<mlir::starplat::Fixed
                                                               // scf.parallel body has an implicit terminator after
                                                               // scf.reduce; nothing else to emit here.
                                                           });
+                Value zeroI8    = arith::ConstantOp::create(rewriter, loc, rewriter.getI8Type(), rewriter.getI8IntegerAttr(0));
                 anySet          = parallelOp.getResult(0);
+                anySet          = arith::CmpIOp::create(rewriter, loc, arith::CmpIPredicate::ne, anySet, zeroI8);
             }
 
             scf::ConditionOp::create(rewriter, loc, anySet, ValueRange{});
@@ -1193,12 +1447,14 @@ struct MinOpLowering : public OpConversionPattern<starplat::MinOp>
         Value propFlagArr = operands[3]; // memref<?xi8>  (was i1 at starplat level; widened)
         Value candA       = operands[4]; // i64
         Value candB       = operands[5]; // i64
-        Value flagVal     = operands[6]; // i1
+        if (isa<LLVM::LLVMPointerType>(candB.getType()))
+            candB = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), candB);
+        Value flagVal = operands[6]; // i1
 
-        auto i8Ty         = rewriter.getI8Type();
-        auto i32Ty        = rewriter.getI32Type();
-        auto i64Ty        = rewriter.getI64Type();
-        auto idxTy        = rewriter.getIndexType();
+        auto i8Ty     = rewriter.getI8Type();
+        auto i32Ty    = rewriter.getI32Type();
+        auto i64Ty    = rewriter.getI64Type();
+        auto idxTy    = rewriter.getIndexType();
 
         // A = *nodeAPtr ; B = *nodeBPtr
         Value aI32 = LLVM::LoadOp::create(rewriter, loc, i32Ty, nodeAPtr);
@@ -1283,6 +1539,7 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
     using ConvertStarPlatIRToBasePassBase::ConvertStarPlatIRToBasePassBase;
 
     void getDependentDialects(mlir::DialectRegistry& registry) const override {
+        registry.insert<mlir::gpu::GPUDialect>();
         registry.insert<mlir::linalg::LinalgDialect>();
         registry.insert<mlir::arith::ArithDialect>();
         registry.insert<mlir::memref::MemRefDialect>();
@@ -1292,6 +1549,8 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
     }
 
     void runOnOperation() override {
+
+        bool useGPU                = false;
 
         mlir::MLIRContext* context = &getContext();
         auto* module               = getOperation();
@@ -1304,6 +1563,7 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
 
         ConversionTarget target(getContext());
 
+        target.addLegalDialect<mlir::gpu::GPUDialect>();
         target.addLegalDialect<mlir::LLVM::LLVMDialect>();
         target.addLegalDialect<mlir::scf::SCFDialect>();
         target.addLegalDialect<mlir::memref::MemRefDialect>();
@@ -1317,6 +1577,7 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         // target.addIllegalOp<mlir::starplat::AttachNodePropertyOp>();
         // target.addIllegalOp<mlir::starplat::ConstOp>();
         // target.addIllegalOp<mlir::starplat::AssignmentOp>();
+        target.addIllegalOp<mlir::starplat::ForAllNodesOp>();
         // target.addIllegalOp<mlir::starplat::SetNodePropertyOp>();
         // target.addIllegalOp<mlir::starplat::FixedPointUntilOp>();
 
@@ -1329,8 +1590,11 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         patterns.add<ConvertDeclareOp2>(typeConverter, context);
         patterns.add<ConvertConstOp>(typeConverter, context);
         patterns.add<ConvertAssignOp>(context);
-        patterns.add<ForallNodesOpLowering>(typeConverter, context);
-        patterns.add<ForallNeighboursOpLowering>(typeConverter, context);
+        if (useGPU)
+            patterns.add<ForallNodesOpLoweringGPU>(typeConverter, context);
+        else
+            patterns.add<ForallNodesOpLoweringCPU>(typeConverter, context);
+        patterns.add<ForallNeighboursOpLoweringCPU>(typeConverter, context);
         patterns.add<ConvertIfOp>(typeConverter, context);
         patterns.add<ConvertNodeCmpOp>(typeConverter, context);
         patterns.add<ConvertIsEdgeOp>(typeConverter, context);

@@ -69,6 +69,7 @@ include_directories(
 # Add executable and link it with the parser library
 
 file(GLOB APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cc") # Track cocunut 🥸
+list(FILTER APP_SOURCES EXCLUDE REGEX ".*starplat-opt\\.cc$")
 
 add_llvm_executable(app ${APP_SOURCES}  codegen/astdump.cpp codegen/starplatIR.cpp ast/ast.cpp starplatDialect/libs/StarPlatDialect.cc  starplatDialect/libs/StarPlatTransforms.cc
         DEPENDS 
@@ -92,9 +93,29 @@ target_link_libraries(app
           MLIRSupport
           MLIRSideEffectInterfaces
           MLIRTransforms)
+add_llvm_executable(starplat-opt starplat-opt.cc starplatDialect/libs/StarPlatDialect.cc
+    DEPENDS
+      MLIRStarPlatIncGen)
+
+target_link_libraries(starplat-opt
+    PRIVATE
+    ${dialect_libs}
+    ${extension_libs}
+    ${translation_libs}
+    MLIRAnalysis
+    MLIRIR
+    MLIRParser
+    MLIRPass
+    MLIROptLib
+    MLIRRegisterAllDialects
+    MLIRRegisterAllPasses
+    MLIRSupport
+    MLIRSideEffectInterfaces
+    MLIRTransforms)
+
 add_custom_target(test
     COMMAND ${CMAKE_SOURCE_DIR}/run.sh ${CMAKE_SOURCE_DIR}/tests/buildup.avl
-    DEPENDS app
+    DEPENDS app starplat-opt
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running run.sh with tests/buildup.avl"
 )

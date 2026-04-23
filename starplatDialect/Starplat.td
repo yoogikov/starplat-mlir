@@ -300,15 +300,15 @@ def GetEdgePropertyOp : StarplatBaseOp<"getEdgeProperty">
     let arguments = (ins I1:$condition);
 }
 
-def ForAllNodesOp : StarplatBaseOp<"forallnodes", [SymbolTable, Symbol]>
+def ForAllNodesOp : StarplatBaseOp<"forallnodes", []>
 {
     let summary = "ForAll over all nodes in a graph";
     let arguments = (ins
         AnyType:$graph,
-        SymbolNameAttr:$sym_name
+        OptionalAttr<StrAttr>:$sym_name
     );
     let regions = (region AnyRegion:$body);
-    
+
     let extraClassDeclaration = [{
         BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
     }];
