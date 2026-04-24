@@ -50,7 +50,7 @@ bool Methodcall::getIsBuiltin() const { return _isBuiltin; }
 void Methodcall::Accept(Visitor* visitor) const { visitor->visitMethodcall(this); }
 void Methodcall::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitMethodcall(this, symbolTable); }
 bool Methodcall::checkIfBuiltin(const Identifier* id) {
-    static const std::set<std::string> builtins = {"print", "attachNodeProperty", "filter", "get_edge", "neighbors", "nodes", "Min"};
+    static const std::set<std::string> builtins = {"print", "attachNodeProperty", "filter", "get_edge", "neighbors", "nodes", "Min", "num_nodes", "count_outNbrs", "is_an_edge"};
     return builtins.find(id->getname()) != builtins.end();
 }
 
@@ -153,13 +153,25 @@ void FixedpointUntil::Accept(Visitor* visitor) const { visitor->visitFixedpointU
 void FixedpointUntil::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitFixedpointUntil(this, symbolTable); }
 
 // ParameterAssignment
-ParameterAssignment::ParameterAssignment(ASTNode* identifier, ASTNode* keyword) : identifier_(identifier), keyword_(keyword) {}
+ParameterAssignment::ParameterAssignment(ASTNode* identifier, ASTNode* rhs, bool iskeyword) : identifier_(identifier) {
+    iskeyword_ = iskeyword;
+    if(iskeyword) {
+        keyword_ = rhs;
+        expr_ = nullptr;
+    }
+    else {
+        keyword_ = nullptr;
+        expr_ = rhs;
+    }
+}
 ParameterAssignment::~ParameterAssignment() {
     delete identifier_;
     delete keyword_;
 }
 ASTNode* ParameterAssignment::getidentifier() const { return identifier_; }
 ASTNode* ParameterAssignment::getkeyword() const { return keyword_; }
+ASTNode* ParameterAssignment::getexpr() const { return expr_; }
+bool ParameterAssignment::isKeyword() const { return iskeyword_; }
 void ParameterAssignment::Accept(Visitor* visitor) const { visitor->visitParameterAssignment(this); }
 void ParameterAssignment::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitParameterAssignment(this, symbolTable); }
 
@@ -190,6 +202,20 @@ ASTNode* ForallStatement::getstmtlist() const { return stmtlist_; }
 void ForallStatement::Accept(Visitor* visitor) const { visitor->visitForallStmt(this); }
 void ForallStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitForallStmt(this, symbolTable); }
 
+// ForStatement
+ForStatement::ForStatement(Identifier* loopVar, ASTNode* expr, ASTNode* stmtlist) : loopVar_(loopVar), expr_(expr), stmtlist_(stmtlist) {}
+ForStatement::ForStatement() {}
+ForStatement::~ForStatement() {
+    delete loopVar_;
+    delete expr_;
+    delete stmtlist_;
+}
+Identifier* ForStatement::getLoopVar() const { return loopVar_; }
+ASTNode* ForStatement::getexpr() const { return expr_; }
+ASTNode* ForStatement::getstmtlist() const { return stmtlist_; }
+void ForStatement::Accept(Visitor* visitor) const { visitor->visitForStmt(this); }
+void ForStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitForStmt(this, symbolTable); }
+
 // DoWhileStatment
 DoWhileStatement::DoWhileStatement(ASTNode* expr, ASTNode* stmtlist) : expr_(expr), stmtlist_(stmtlist) {}
 DoWhileStatement::~DoWhileStatement() {
@@ -212,6 +238,20 @@ ASTNode* IfStatement::getexpr() const { return expr; }
 ASTNode* IfStatement::getstmt() const { return stmt; }
 void IfStatement::Accept(Visitor* visitor) const { visitor->visitIfStmt(this); }
 void IfStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitIfStmt(this, symbolTable); }
+
+//IfElseStatement
+IfElseStatement::IfElseStatement(ASTNode* expr, ASTNode* stmt1, ASTNode* stmt2) : expr(expr), stmt1(stmt1), stmt2(stmt2) {}
+IfElseStatement::IfElseStatement() {}
+IfElseStatement::~IfElseStatement() {
+    delete expr;
+    delete stmt1;
+    delete stmt2;
+}
+ASTNode* IfElseStatement::getexpr() const { return expr; }
+ASTNode* IfElseStatement::getstmt1() const { return stmt1; }
+ASTNode* IfElseStatement::getstmt2() const { return stmt2; }
+void IfElseStatement::Accept(Visitor* visitor) const { visitor->visitIfElseStmt(this); }
+void IfElseStatement::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitIfElseStmt(this, symbolTable); }
 
 // BoolExpr
 BoolExpr::BoolExpr(ASTNode* expr1, char* op, ASTNode* expr2) : expr1_(expr1), expr2_(expr2), op_(op) {}
@@ -324,10 +364,32 @@ ASTNode* Incandassignstmt::getexpr() const { return expr; }
 void Incandassignstmt::Accept(Visitor* visitor) const { visitor->visitIncandassignstmt(this); }
 void Incandassignstmt::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitIncandassignstmt(this, symbolTable); }
 
+// Incstmt
+Incstmt::Incstmt(Identifier* identifier) : identifier(identifier) {}
+Incstmt::Incstmt() {}
+Incstmt::~Incstmt() {
+    delete identifier;
+}
+Identifier* Incstmt::getIdentifier() const { return identifier; }
+void Incstmt::Accept(Visitor* visitor) const { visitor->visitIncstmt(this); }
+void Incstmt::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitIncstmt(this, symbolTable); }
 // Number
-Number::Number(char* number) : number_(atoi(number)) {}
+Number::Number(char* number) {
+    std::string s(number);
+    if (s.find('.') != std::string::npos) {
+        isFloat_      = true;
+        numberfloat_  = atof(number);
+        number_       = 0;
+    } else {
+        isFloat_      = false;
+        number_       = atoi(number);
+        numberfloat_  = 0.0;
+    }
+}
 Number::Number() {}
 int Number::getnumber() const { return number_; }
+double Number::getnumberfloat() const { return numberfloat_; }
+bool Number::isFloat() const { return isFloat_; }
 void Number::Accept(Visitor* visitor) const { visitor->visitNumber(this); }
 void Number::Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const { visitor->visitNumber(this, symbolTable); }
 

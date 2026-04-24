@@ -267,6 +267,21 @@ def GetEdgePropertyOp : StarplatBaseOp<"getEdgeProperty">
 
  }
 
+ def ForOp : StarplatBaseOp<"for", [SymbolTable, Symbol]>
+ {
+    let summary = "For loop";
+    let description = [{"For operation description."}];
+
+    let arguments = ( ins 
+                      Variadic<AnyType> : $arguments,
+                      OptionalAttr<ArrayAttr> : $loopattributes,
+                      BoolAttr : $filter,
+                      SymbolNameAttr:$sym_name
+                    );
+    
+    let regions = (region AnyRegion:$body);
+ } 
+
  def ForAllOp : StarplatBaseOp<"forall", [SymbolTable, Symbol]>
  {
     let summary = "Forall loop";
@@ -365,6 +380,27 @@ def CmpOp : StarplatBaseOp<"cmp">
                     AnyType : $edge
     );
  }
+
+def NumNodesOp : StarplatBaseOp<"num_nodes">
+{
+    let summary = "Get number of nodes in graph";
+    let arguments = (ins AnyType:$graph);
+    let results = (outs AnyType:$result);
+}
+
+def CastOp : StarplatBaseOp<"cast">
+{
+    let summary = "Cast between types";
+    let arguments = (ins AnyType:$input);
+    let results = (outs AnyType:$result);
+}
+
+def CountOutNbrsOp : StarplatBaseOp<"count_outNbrs">
+{
+    let summary = "Count outgoing neighbours of a node";
+    let arguments = (ins AnyType:$graph, AnyType:$node);
+    let results = (outs AnyType:$result);
+}
 
 def StoreOp : StarplatBaseOp<"store">
 {
@@ -520,6 +556,16 @@ def StarPlatIfOp : StarplatBaseOp<"spif", [SymbolTable, Symbol]>
         SymbolNameAttr:$sym_name
     );
     let regions = (region AnyRegion:$body);
+}
+
+def StarPlatIfElseOp : StarplatBaseOp<"ifelse", [NoTerminator]>
+{
+    let summary = "If-Else Statement";
+    let arguments = (ins
+        I1:$condition,
+        SymbolNameAttr:$sym_name
+    );
+    let regions = (region AnyRegion:$ifBody, AnyRegion:$elseBody);
 }
 
 

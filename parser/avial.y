@@ -18,11 +18,21 @@
 
 
 %token<id> FUNCTION LPAREN RPAREN LCURLY RCURLY RETURN IDENTIFIER ASGN NUMBER LTxx GT FORALL FOR EQUALS EDGE NODE
-%token<id> INT IF SEMICLN DOT IN COMMA EQUAL GRAPH PLUSEQUAL PROPNODE PROPEDGE FALSE INF FIXEDPOINT UNTIL COLON PLUS TRUE NOT BOOL FLOAT DO WHILE MINUS TIMES DIVIDE AND OR
+%token<id> INT IF SEMICLN DOT IN COMMA EQUAL GRAPH PLUSEQUAL PROPNODE PROPEDGE FALSE INF FIXEDPOINT UNTIL COLON PLUS TRUE NOT BOOL FLOAT DO WHILE MINUS TIMES DIVIDE AND OR GTE LTE DECIMAL INCREMENT
 
 %type<astNode>  methodcall memberaccess expr type paramlist arglist arg function boolexpr declarationstmt stmt 
 stmtlist ifstmt forstmt returnstmt forallstmt dowhileStmt incandassignstmt assignment initializestmt fixedPointStmt tuppleAssignmentstmt memberaccessstmt assignmentStmt
-addExpr properties templateType templateDecl paramAssignment param memberaccessAssignment KEYWORDS subExpr mulExpr divExpr andExpr orExpr
+addExpr properties templateType templateDecl paramAssignment param memberaccessAssignment KEYWORDS subExpr mulExpr divExpr andExpr orExpr ifelsestmt incstmt
+
+%nonassoc LOWER_THAN_ELSE
+%nonassoc ELSE
+
+%left OR
+%left AND
+%left EQUALS GTE LTE
+%left LTxx GT
+%left PLUS MINUS
+%left TIMES DIVIDE
 
 
 %%
@@ -53,10 +63,12 @@ stmtlist :                  {
 stmt :  assignmentStmt                              {$$ = $1;}
         |   declarationstmt                             {$$ = $1;}
         |   ifstmt			                {$$ = $1;}
+        |   ifelsestmt			                {$$ = $1;}
         |   forstmt 			                {$$ = $1;}
         |   returnstmt 			                {$$ = $1;}
         |   forallstmt			                {$$ = $1;}
         |   incandassignstmt	                        {$$ = $1;}
+        |   incstmt                                     {$$ = $1;}
         |   templateDecl                                {$$ = $1;}
         |   /*epsilon*/                                 {$$ = nullptr;}
         |   memberaccessstmt                            {$$ = $1;}
@@ -86,6 +98,12 @@ declarationstmt : type IDENTIFIER SEMICLN                   {
                                                                 $$ = new DeclarationStatement($1, identifier, number);
                                                         
                                                         }
+                | type IDENTIFIER EQUAL DECIMAL SEMICLN  {
+                                                                Identifier* identifier = new Identifier($2);
+                                                                Number* number =   new Number($4);
+                                                                $$ = new DeclarationStatement($1, identifier, number);
+                                                        
+                                                        }
             ;
 
 templateDecl : templateType IDENTIFIER SEMICLN {      
@@ -106,10 +124,12 @@ initializestmt : type IDENTIFIER EQUAL expr SEMICLN {
 
 paramAssignment : IDENTIFIER EQUAL KEYWORDS  {
                                                 Identifier *identifier = new Identifier($1);
-                                                $$ = new ParameterAssignment(identifier, $3);
-
-
-}
+                                                $$ = new ParameterAssignment(identifier, $3,true);
+                                        }
+                | IDENTIFIER EQUAL expr {
+                        Identifier* identifier = new Identifier($1);
+                        $$ = new ParameterAssignment(identifier, $3,false);
+                }
 
 fixedPointStmt : FIXEDPOINT UNTIL LPAREN IDENTIFIER COLON expr RPAREN LCURLY stmtlist RCURLY         { 
                                                                                                                 Identifier *identifier = new Identifier($4);
@@ -126,15 +146,24 @@ boolexpr : expr LTxx expr 		{$$ = new BoolExpr($1, strdup("<"), $3);}
 
          | expr EQUALS expr             {$$ = new BoolExpr($1, const_cast<char*>("=="), $3);} 
 
+         | expr GTE expr                {$$ = new BoolExpr($1, const_cast<char*>(">="), $3);} 
+         
+         | expr LTE expr                {$$ = new BoolExpr($1, const_cast<char*>("<="), $3);} 
+
          | NOT expr                     {$$ = new BoolExpr($2, const_cast<char*>("!"));} 
          ;
 
-ifstmt : IF LPAREN expr RPAREN stmt         {$$ = new IfStatement($3, $5);}
-        | IF LPAREN expr RPAREN LCURLY stmtlist RCURLY     {$$ = new IfStatement($3, $6);}
-        ;
+ifstmt : IF LPAREN expr RPAREN stmt          %prec LOWER_THAN_ELSE { $$ = new IfStatement($3, $5); }
+       | IF LPAREN expr RPAREN LCURLY stmtlist RCURLY { $$ = new IfStatement($3, $6); }
+       ;
+
+ifelsestmt : IF LPAREN expr RPAREN stmt ELSE stmt { $$ = new IfElseStatement($3, $5, $7); }
+           | IF LPAREN expr RPAREN LCURLY stmtlist RCURLY ELSE LCURLY stmtlist RCURLY { $$ = new IfElseStatement($3, $6, $10); }
+           ;
 
 
-forstmt : FOR LPAREN IDENTIFIER IN expr RPAREN LCURLY stmtlist RCURLY      { $$ = new ForallStatement(); }
+forstmt : FOR LPAREN IDENTIFIER IN expr RPAREN LCURLY stmtlist RCURLY      { Identifier* identifier = new Identifier($3);
+                                                                  $$ = new ForStatement(identifier, $5, $8); }
 
 forallstmt : FORALL LPAREN IDENTIFIER IN expr RPAREN LCURLY stmtlist RCURLY    {
                                                                   Identifier* identifier = new Identifier($3);
@@ -144,6 +173,7 @@ forallstmt : FORALL LPAREN IDENTIFIER IN expr RPAREN LCURLY stmtlist RCURLY    {
 expr :  IDENTIFIER              {$$ = new Expression( new Identifier($1), KIND_IDENTIFIER);} 
      |  boolexpr                {$$ = new Expression ($1, KIND_BOOLEXPR);}
      |  NUMBER                  {$$ = new Expression( new Number($1), KIND_NUMBER);}
+     |  DECIMAL                 {$$ = new Expression( new Number($1), KIND_NUMBER);}
      |  memberaccess            {$$ = new Expression ($1, KIND_MEMBERACCESS);}
      |  KEYWORDS                {$$ = new Expression ($1, KIND_KEYWORD);}
      |  methodcall              {$$ = new Expression ($1, KIND_METHODCALL);}
@@ -173,6 +203,11 @@ incandassignstmt : IDENTIFIER PLUSEQUAL expr SEMICLN  {
                                                         $$ = new Incandassignstmt(identifier, $2, $3);
                                                       }
              ;
+
+incstmt : IDENTIFIER INCREMENT SEMICLN
+{ Identifier* identifier = new Identifier($1); 
+  $$ = new Incstmt(identifier);
+}
 
 returnstmt : RETURN expr SEMICLN        {$$ = new ReturnStmt($2);}
            ;

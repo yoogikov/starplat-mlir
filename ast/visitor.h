@@ -41,6 +41,9 @@ class Methodcall;
 class Memberaccess;
 class MemberacceessStmt;
 class DoWhileStatement;
+class IfElseStatement;
+class Incstmt;
+class ForStatement;
 
 
 class Visitor
@@ -51,10 +54,13 @@ class Visitor
         virtual void visitDeclarationStmt(const DeclarationStatement *declStmt) = 0;
         virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement *templatedeclStmt) = 0;
         virtual void visitForallStmt(const ForallStatement *forAllStmt) = 0;
+        virtual void visitForStmt(const ForStatement *forStmt) = 0;
         virtual void visitDoWhileStmt(const DoWhileStatement* doWhileStmt) = 0;
         virtual void visitIfStmt(const IfStatement *ifStmt) = 0;
+        virtual void visitIfElseStmt(const IfElseStatement *ifElseStmt) = 0;
         virtual void visitBoolExpr(const BoolExpr *boolExpr) = 0;
         virtual void visitIncandassignstmt(const Incandassignstmt *incandassignstmt) = 0;
+        virtual void visitIncstmt(const Incstmt *incstmt) = 0;
         virtual void visitAssignment(const Assignment *assignment) = 0;
         virtual void visitAssignmentStmt(const AssignmentStmt *assignmentStmt) = 0;
         virtual void visitIdentifier(const Identifier *identifier) = 0;
@@ -97,10 +103,13 @@ class MLIRVisitor
         virtual void visitDeclarationStmt(const DeclarationStatement *declStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitTemplateDeclarationStmt(const TemplateDeclarationStatement *templatedeclStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitForallStmt(const ForallStatement *forAllStmt, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitForStmt(const ForStatement *forStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitDoWhileStmt(const DoWhileStatement *doWhileStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIfStmt(const IfStatement *ifStmt, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitIfElseStmt(const IfElseStatement *ifElseStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitBoolExpr(const BoolExpr *boolExpr, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIncandassignstmt(const Incandassignstmt *incandassignstmt, mlir::SymbolTable *symbolTable) = 0;
+        virtual void visitIncstmt(const Incstmt *incstmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitAssignment(const Assignment *assignment, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitAssignmentStmt(const AssignmentStmt *assignmentStmt, mlir::SymbolTable *symbolTable) = 0;
         virtual void visitIdentifier(const Identifier *identifier, mlir::SymbolTable *symbolTable) = 0;
