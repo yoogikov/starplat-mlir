@@ -265,21 +265,8 @@ struct ConvertDeclareOp2 : public OpConversionPattern<mlir::starplat::DeclareOp2
     LogicalResult matchAndRewrite(mlir::starplat::DeclareOp2 op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
 
         auto resType = op->getResult(0).getType();
-        if (isa<starplat::SPIntType>(resType)) {
-            auto loc                   = op->getLoc();
-            mlir::MLIRContext* context = getContext();
-            auto allocaop = LLVM::AllocaOp::create(rewriter, loc, LLVM::LLVMPointerType::get(context), LLVM::LLVMPointerType::get(context),
-                                                   LLVM::ConstantOp::create(rewriter, loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(1)), 0);
-            rewriter.replaceOp(op, allocaop);
-        }
-        else if (isa<starplat::NodeType>(resType)) {
-            auto loc                   = op->getLoc();
-            mlir::MLIRContext* context = getContext();
-            auto allocaop = LLVM::AllocaOp::create(rewriter, loc, LLVM::LLVMPointerType::get(context), LLVM::LLVMPointerType::get(context),
-                                                   LLVM::ConstantOp::create(rewriter, loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(1)), 0);
-            rewriter.replaceOp(op, allocaop);
-        }
-        else if (isa<starplat::EdgeType>(resType)) {
+        if (isa<starplat::SPIntType>(resType) || isa<starplat::SPFloatType>(resType) || isa<starplat::NodeType>(resType) ||
+            isa<starplat::EdgeType>(resType)) {
             auto loc                   = op->getLoc();
             mlir::MLIRContext* context = getContext();
             auto allocaop = LLVM::AllocaOp::create(rewriter, loc, LLVM::LLVMPointerType::get(context), LLVM::LLVMPointerType::get(context),
@@ -1585,6 +1572,94 @@ struct ConvertGetEdgeProperty : public OpConversionPattern<mlir::starplat::GetEd
     }
 };
 
+struct ConvertNumNodesOp : public OpConversionPattern<mlir::starplat::NumNodesOp>
+{
+    using OpConversionPattern<mlir::starplat::NumNodesOp>::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::NumNodesOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter& rewriter) const override {
+        auto loc    = op.getLoc();
+        auto ctx    = op.getContext();
+        auto module = op->getParentOfType<mlir::ModuleOp>();
+
+        auto ptrTy = LLVM::LLVMPointerType::get(ctx);
+        auto i32Ty = rewriter.getI32Type();
+
+        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn =
+            LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
+        if (failed(getNumNodesFn))
+            return rewriter.notifyMatchFailure(op, "failed to declare get_num_nodes");
+
+        Value graphPtr = adaptor.getOperands()[0];
+        Value nI32     = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
+
+        auto resultType = op.getResult().getType();
+        Value result;
+        if (resultType == i32Ty) {
+            result = nI32;
+        } else if (auto intTy = dyn_cast<IntegerType>(resultType)) {
+            if (intTy.getWidth() > 32)
+                result = arith::ExtSIOp::create(rewriter, loc, resultType, nI32);
+            else
+                result = arith::TruncIOp::create(rewriter, loc, resultType, nI32);
+        } else {
+            return rewriter.notifyMatchFailure(op, "unsupported num_nodes result type");
+        }
+
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
+
+struct ConvertCastOp : public OpConversionPattern<mlir::starplat::CastOp>
+{
+    using OpConversionPattern<mlir::starplat::CastOp>::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::CastOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter& rewriter) const override {
+        auto loc     = op.getLoc();
+        Value input  = adaptor.getOperands()[0];
+        auto srcType = input.getType();
+        auto dstType = op.getResult().getType();
+
+        if (srcType == dstType) {
+            rewriter.replaceOp(op, input);
+            return success();
+        }
+
+        bool srcIsInt   = isa<IntegerType>(srcType);
+        bool srcIsFloat = isa<FloatType>(srcType);
+        bool dstIsInt   = isa<IntegerType>(dstType);
+        bool dstIsFloat = isa<FloatType>(dstType);
+
+        Value result;
+        if (srcIsInt && dstIsFloat) {
+            result = arith::SIToFPOp::create(rewriter, loc, dstType, input);
+        } else if (srcIsFloat && dstIsInt) {
+            result = arith::FPToSIOp::create(rewriter, loc, dstType, input);
+        } else if (srcIsInt && dstIsInt) {
+            unsigned srcW = cast<IntegerType>(srcType).getWidth();
+            unsigned dstW = cast<IntegerType>(dstType).getWidth();
+            if (dstW > srcW)
+                result = arith::ExtSIOp::create(rewriter, loc, dstType, input);
+            else
+                result = arith::TruncIOp::create(rewriter, loc, dstType, input);
+        } else if (srcIsFloat && dstIsFloat) {
+            unsigned srcW = cast<FloatType>(srcType).getWidth();
+            unsigned dstW = cast<FloatType>(dstType).getWidth();
+            if (dstW > srcW)
+                result = arith::ExtFOp::create(rewriter, loc, dstType, input);
+            else
+                result = arith::TruncFOp::create(rewriter, loc, dstType, input);
+        } else {
+            return rewriter.notifyMatchFailure(op, "unsupported cast type combination");
+        }
+
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
+
 namespace mlir
 {
 namespace starplat
@@ -1636,6 +1711,8 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         // target.addIllegalOp<mlir::starplat::ConstOp>();
         // target.addIllegalOp<mlir::starplat::AssignmentOp>();
         target.addIllegalOp<mlir::starplat::ForAllNodesOp>();
+        target.addIllegalOp<mlir::starplat::NumNodesOp>();
+        target.addIllegalOp<mlir::starplat::CastOp>();
 
         // target.addIllegalOp<mlir::starplat::SetNodePropertyOp>();
         // target.addIllegalOp<mlir::starplat::FixedPointUntilOp>();
@@ -1665,6 +1742,8 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         patterns.add<ConvertFixedPointUntil>(typeConverter, context);
         patterns.add<MinOpLowering>(typeConverter, context);
         patterns.add<ConvertReturnOp>(typeConverter, context);
+        patterns.add<ConvertNumNodesOp>(typeConverter, context);
+        patterns.add<ConvertCastOp>(typeConverter, context);
 
         // populateFunctionOpInterfaceTypeConversionPattern<mlir::starplat::FuncOp>(patterns, typeConverter);
         // target.addDynamicallyLegalOp<mlir::starplat::FuncOp>([&](starplat::FuncOp op)
