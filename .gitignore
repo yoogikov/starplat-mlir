@@ -13,7 +13,6 @@ tags
 workspace/*
 todiscuss
 StarPlatIR.docs
-testing
 run_full.sh
 run_full.sh
 tests/my_test.avl

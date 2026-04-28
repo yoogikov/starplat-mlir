@@ -314,13 +314,13 @@ def ForAllNodesOp : StarplatBaseOp<"forallnodes", []>
     }];
 }
 
-def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", [SymbolTable, Symbol]>
+def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", []>
 {
     let summary = "ForAll over neighbours of a node";
     let arguments = (ins
         AnyType:$graph,
         AnyType:$node,
-        SymbolNameAttr:$sym_name
+        OptionalAttr<StrAttr>:$sym_name
     );
     let regions = (region AnyRegion:$body);
 
@@ -512,12 +512,11 @@ def ReturnOp : StarplatBaseOp<"return", [Terminator]>
     );
     let results = (outs I1 : $result);
 }
-def StarPlatIfOp : StarplatBaseOp<"spif", [SymbolTable, Symbol]>
+def StarPlatIfOp : StarplatBaseOp<"spif", []>
 {
     let summary = "StarPlat If operation";
     let arguments = (ins
-        I1:$condition,
-        SymbolNameAttr:$sym_name
+        I1:$condition
     );
     let regions = (region AnyRegion:$body);
 }

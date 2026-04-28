@@ -36,6 +36,8 @@ include_directories(${MLIR_INCLUDE_DIRS})
 link_directories(${LLVM_BUILD_LIBRARY_DIR})
 add_definitions(${LLVM_DEFINITIONS})
 
+find_program(MLIR_TRANSLATE mlir-translate REQUIRED)
+
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 get_property(extension_libs GLOBAL PROPERTY MLIR_EXTENSION_LIBS)
 get_property(translation_libs GLOBAL PROPERTY MLIR_TRANSLATION_LIBS)
@@ -111,14 +113,26 @@ target_link_libraries(starplat-opt
     MLIRRegisterAllPasses
     MLIRSupport
     MLIRSideEffectInterfaces
-    MLIRTransforms)
+    MLIRTransforms
+    MLIROpenMPToLLVM
+    MLIRSCFToOpenMP
+    MLIRLinalgDialect
+    MLIRLinalgTransforms)
 
 add_custom_target(test
-    COMMAND ${CMAKE_SOURCE_DIR}/run.sh ${CMAKE_SOURCE_DIR}/tests/buildup.avl
+    COMMAND ${CMAKE_SOURCE_DIR}/run.sh ${CMAKE_SOURCE_DIR}/testing/buildup.avl
     DEPENDS app starplat-opt
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running run.sh with tests/buildup.avl"
 )
+add_custom_target(lower_to_llvm
+    COMMAND bash -c "set -o pipefail && ${CMAKE_BINARY_DIR}/bin/app ${CMAKE_SOURCE_DIR}/tests/buildup.avl | ${CMAKE_BINARY_DIR}/bin/starplat-opt - --starplat-to-llvm | ${MLIR_TRANSLATE} --mlir-to-llvmir -o ${CMAKE_SOURCE_DIR}/testing/out.ll"
+    DEPENDS app starplat-opt
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "StarPlat -> MLIR -> LLVM dialect -> testing/out.ll"
+    VERBATIM
+)
+
 add_custom_target(test_full
     COMMAND ${CMAKE_SOURCE_DIR}/run_full.sh ${CMAKE_SOURCE_DIR}/tests/buildup.avl
     DEPENDS app

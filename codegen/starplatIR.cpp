@@ -621,7 +621,7 @@ void StarPlatCodeGen::visitForallStmt(const ForallStatement* forAllStmt, mlir::S
                                                     lhsFilterSymbol, rhsFilterSymbol,
                                                     builder.getStringAttr(filterOp));
 
-        auto ifOp  = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), cmpOp->getResult(0), builder.getStringAttr("spif"));
+        auto ifOp  = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), cmpOp->getResult(0));
         auto& ifBlock = ifOp.getBody().emplaceBlock();
         builder.setInsertionPointToStart(&ifBlock);
 
@@ -735,7 +735,7 @@ void StarPlatCodeGen::visitIfStmt(const IfStatement* ifStmt, mlir::SymbolTable* 
                                                      node1Symbol, node2Symbol);
 
     // scf.if
-    auto ifOp     = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), isEdgeOp->getResult(0), builder.getStringAttr("spif"));
+    auto ifOp     = mlir::starplat::StarPlatIfOp::create(builder, builder.getUnknownLoc(), isEdgeOp->getResult(0));
 
     auto& ifBlock = ifOp.getBody().emplaceBlock();
     builder.setInsertionPointToStart(&ifBlock);

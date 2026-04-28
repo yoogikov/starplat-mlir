@@ -1,5 +1,3 @@
-#ifndef STARPLAT2BASE
-#define STARPLAT2BASE
 
 #include "includes/StarPlatOps.h"
 #include "includes/StarPlatTypes.h"
@@ -1684,4 +1682,3 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
 } // namespace starplat
 } // namespace mlir
 
-#endif
