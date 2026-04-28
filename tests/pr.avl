@@ -22,4 +22,6 @@ function ComputePageRank(Graph g, float beta, float delta, int maxIter, propNode
         pageRank = pageRankNext;
         iterCount++;
     } while ((diff > beta) && (iterCount < maxIter));
+
+    return 0;
 }

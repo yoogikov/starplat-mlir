@@ -33,7 +33,7 @@ void CodeGen::visitDeclarationStmt(const DeclarationStatement* dclstmt) {
 
     identifier->Accept(this);
 
-    number->Accept(this);
+    if(number) number->Accept(this);
 
     --beautifier;
     beautifier.print_tab();
@@ -185,6 +185,46 @@ void CodeGen::visitForallStmt(const ForallStatement* forAllStmt) {
     cout << "}\n";
 }
 
+void CodeGen::visitForStmt(const ForStatement* forStmt) {
+    beautifier.print_tab();
+    std::cout << "Forall: {\n";
+    ++beautifier;
+
+    beautifier.print_tab();
+    std::cout << "Loop Var: {\n";
+    ++beautifier;
+
+    forStmt->getLoopVar()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    beautifier.print_tab();
+    std::cout << "Loop Expr: {\n";
+    ++beautifier;
+
+    forStmt->getexpr()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    beautifier.print_tab();
+    std::cout << "Loop Body: {\n";
+    ++beautifier;
+
+    forStmt->getstmtlist()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
 void CodeGen::visitDoWhileStmt(const DoWhileStatement* doWhileStmt) {
     beautifier.print_tab();
     std::cout << "DoWhile: {\n";
@@ -228,6 +268,28 @@ void CodeGen::visitIfStmt(const IfStatement* ifStmt) {
     std::cout << "}\n";
 }
 
+void CodeGen::visitIfElseStmt(const IfElseStatement* ifElseStmt) {
+    beautifier.print_tab();
+    std::cout << "Linked If Statement: {\n";
+    ++beautifier;
+    ifElseStmt->getexpr()->Accept(this);
+    ifElseStmt->getstmt1()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+
+    beautifier.print_tab();
+    std::cout << "Else Statement: {\n";
+    ++beautifier;
+
+    ifElseStmt->getstmt2()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    std::cout << "}\n";
+}
+
 void CodeGen::visitBoolExpr(const BoolExpr* boolExpr) { 
     beautifier.print_tab();
     std::cout << "Bool Expression {\n";
@@ -256,9 +318,35 @@ void CodeGen::visitIncandassignstmt(const Incandassignstmt* incandassignstmt) {
     cout << "}\n";
 }
 
-void CodeGen::visitAssignment(const Assignment* assignment) {}
+void CodeGen::visitIncstmt(const Incstmt* incstmt) {
+    beautifier.print_tab();
+    std::cout << "Increment Statement: {\n";
+    ++beautifier;
 
-void CodeGen::visitAssignmentStmt(const AssignmentStmt* assignemntStmt) {}
+    incstmt->getIdentifier()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
+
+void CodeGen::visitAssignment(const Assignment* assignment) {
+    beautifier.print_tab();
+    std::cout << "Identifier: " << assignment->getIdentifier() << "\n";
+    assignment->getexpr() -> Accept(this);
+}
+
+void CodeGen::visitAssignmentStmt(const AssignmentStmt* assignemntStmt) {
+    beautifier.print_tab();
+    std::cout << "Assignment Statement: {\n";
+    ++beautifier;
+
+    assignemntStmt->getAssignment()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
+}
 
 void CodeGen::visitIdentifier(const Identifier* identifier) { 
     beautifier.print_tab();
@@ -329,14 +417,28 @@ void CodeGen::visitFixedpointUntil(const FixedpointUntil* fixedpointuntil) {
     Statementlist* stmtlist = static_cast<Statementlist*>(fixedpointuntil->getstmtlist());
 
     beautifier.print_tab();
-    cout << "Fixed Point Until\n";
+    cout << "Fixed Point Until{\n";
+    ++beautifier;
 
     stmtlist->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
 }
 
 void CodeGen::visitInitialiseAssignmentStmt(const InitialiseAssignmentStmt* initialiseAssignmentStmt) { 
     beautifier.print_tab();
-    cout << "Init Assignment Stmt\n"; 
+    cout << "Init Assignment Stmt {\n";
+    ++beautifier;
+    
+    initialiseAssignmentStmt->gettype()->Accept(this);
+    initialiseAssignmentStmt->getidentifier()->Accept(this);
+    initialiseAssignmentStmt->getexpr()->Accept(this);
+
+    --beautifier;
+    beautifier.print_tab();
+    cout << "}\n";
 }
 
 void CodeGen::visitMemberAccessAssignment(const MemberAccessAssignment* memberAccessAssignment) { 
@@ -430,7 +532,9 @@ void CodeGen::visitArg(const Arg* arg) {
     }
 }
 
-void CodeGen::visitStatement(const Statement* statement) {}
+void CodeGen::visitStatement(const Statement* statement) {
+    statement->getstatement()->Accept(this);
+}
 
 void CodeGen::visitStatementlist(const Statementlist* stmtlist) {
     for (ASTNode* stmt : stmtlist->getStatementList()) {
@@ -445,7 +549,8 @@ void CodeGen::visitType(const TypeExpr* type) {
 
 void CodeGen::visitNumber(const Number* number) { 
     beautifier.print_tab();
-    cout << "Number: " << number->getnumber() << "\n"; 
+    if(number->isFloat()) cout << "Decimal: " << number->getnumberfloat() << "\n";
+    else cout << "Number: " << number->getnumber() << "\n"; 
 }
 
 void CodeGen::visitExpression(const Expression* expr) {

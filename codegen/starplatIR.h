@@ -52,15 +52,21 @@ class StarPlatCodeGen : public MLIRVisitor
 
     virtual void visitForallStmt(const ForallStatement* forAllStmt, mlir::SymbolTable* symbolTable) override;
 
+    virtual void visitForStmt(const ForStatement* forStmt, mlir::SymbolTable* symbolTable) override;
+
     virtual void visitDoWhileStmt(const DoWhileStatement* doWhileStmt, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitMemberaccessStmt(const MemberacceessStmt* MemberacceessStmt, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitIfStmt(const IfStatement* ifStmt, mlir::SymbolTable* symbolTable) override;
+    
+    virtual void visitIfElseStmt(const IfElseStatement* ifStmt, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitBoolExpr(const BoolExpr* boolExpr, mlir::SymbolTable* symbolTable) override;
 
     virtual void visitIncandassignstmt(const Incandassignstmt* incandassignstmt, mlir::SymbolTable* symbolTable) override;
+
+    virtual void visitIncstmt(const Incstmt* incstmt, mlir::SymbolTable* symbolTable) override;
 
     void visitAssignment(const Assignment* assignment, mlir::SymbolTable* symbolTable) override;
 

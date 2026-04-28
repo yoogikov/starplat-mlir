@@ -248,7 +248,7 @@ class FixedpointUntil : public ASTNode
 class ParameterAssignment : public ASTNode
 {
   public:
-    ParameterAssignment(ASTNode* identifier, ASTNode* keyword);
+    ParameterAssignment(ASTNode* identifier, ASTNode* keyword, bool iskeyword);
 
     virtual void Accept(Visitor* visitor) const override;
 
@@ -258,10 +258,14 @@ class ParameterAssignment : public ASTNode
 
     ASTNode* getidentifier() const;
     ASTNode* getkeyword() const;
+    ASTNode* getexpr() const;
+    bool isKeyword() const;
 
   private:
     ASTNode* identifier_;
     ASTNode* keyword_;
+    ASTNode* expr_;
+    bool iskeyword_;
 };
 
 class TemplateDeclarationStatement : public ASTNode
@@ -306,6 +310,28 @@ class ForallStatement : public ASTNode
     ASTNode* stmtlist_;
 };
 
+class ForStatement : public ASTNode
+{
+  public:
+    ForStatement(Identifier* loopVar, ASTNode* expr, ASTNode* stmtlist);
+
+    ForStatement();
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~ForStatement();
+
+    Identifier* getLoopVar() const;
+    ASTNode* getexpr() const;
+    ASTNode* getstmtlist() const;
+
+  private:
+    Identifier* loopVar_;
+    ASTNode* expr_;
+    ASTNode* stmtlist_;
+};
 
 class DoWhileStatement : public ASTNode
 {
@@ -345,6 +371,29 @@ class IfStatement : public ASTNode
   private:
     ASTNode* expr;
     ASTNode* stmt;
+};
+
+class IfElseStatement : public ASTNode
+{
+  public:
+    IfElseStatement(ASTNode* expr, ASTNode* stmt1, ASTNode* stmt2);
+
+    IfElseStatement();
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~IfElseStatement();
+
+    ASTNode* getexpr() const;
+    ASTNode* getstmt1() const;
+    ASTNode* getstmt2() const;
+
+  private:
+    ASTNode* expr;
+    ASTNode* stmt1;
+    ASTNode* stmt2;
 };
 
 class BoolExpr : public ASTNode
@@ -542,9 +591,28 @@ class Incandassignstmt : public ASTNode
     ASTNode* expr;
 };
 
-class Number : public ASTNode
+class Incstmt : public ASTNode 
 {
   public:
+    Incstmt(Identifier* identifier);
+
+    Incstmt();
+
+    virtual void Accept(Visitor* visitor) const override;
+
+    virtual void Accept(MLIRVisitor* visitor, mlir::SymbolTable* symbolTable) const override;
+
+    ~Incstmt();
+
+    Identifier* getIdentifier() const;
+
+  private:
+    Identifier* identifier;
+};
+
+class Number : public ASTNode 
+{
+public:
     Number(char* number);
 
     Number();
@@ -555,8 +623,14 @@ class Number : public ASTNode
 
     int getnumber() const;
 
-  private:
+    double getnumberfloat() const;
+    
+    bool isFloat() const;
+    // ... rest
+private:
     int number_;
+    double numberfloat_;
+    bool isFloat_;
 };
 
 class ReturnStmt : public ASTNode
