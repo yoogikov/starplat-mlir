@@ -1263,6 +1263,15 @@ mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTab
     if (!expr) { llvm::outs() << "Error: null expression\n"; return nullptr; }
     // llvm::outs() << "resolveExpr: kind = " << expr->getKind() << "\n";
 
+    // basic type inference for return type being a float
+    auto inferType = [&](mlir::Value lhs, mlir::Value rhs) -> mlir::Type {
+        if (mlir::isa<mlir::starplat::SPFloatType>(lhs.getType()) ||
+            mlir::isa<mlir::starplat::SPFloatType>(rhs.getType()) ||
+            lhs.getType().isF64() || rhs.getType().isF64())
+            return builder.getF64Type();
+        return builder.getI64Type(); // default
+    };
+
     switch (expr->getKind()) {
 
         case ExpressionKind::KIND_IDENTIFIER: {
@@ -1387,7 +1396,7 @@ mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTab
             auto rhs = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
             if (!lhs || !rhs) return nullptr;
             return mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(),
-                builder.getI64Type(), lhs, rhs)->getResult(0);
+                inferType(lhs, rhs), lhs, rhs)->getResult(0);
         }
 
         case ExpressionKind::KIND_SUBOP: {
@@ -1396,7 +1405,7 @@ mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTab
             auto rhs = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
             if (!lhs || !rhs) return nullptr;
             return mlir::starplat::SubOp::create(builder, builder.getUnknownLoc(),
-                builder.getI64Type(), lhs, rhs)->getResult(0);
+                inferType(lhs, rhs), lhs, rhs)->getResult(0);
         }
 
         case ExpressionKind::KIND_MULOP: {
@@ -1405,7 +1414,7 @@ mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTab
             auto rhs = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
             if (!lhs || !rhs) return nullptr;
             return mlir::starplat::MulOp::create(builder, builder.getUnknownLoc(),
-                builder.getI64Type(), lhs, rhs)->getResult(0);
+                inferType(lhs, rhs), lhs, rhs)->getResult(0);
         }
 
         case ExpressionKind::KIND_DIVOP: {
