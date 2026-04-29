@@ -14,11 +14,17 @@ module {
     %8 = "starplat.const"() <{sym_name = "const_2", sym_visibility = "private", value = 0 : i64}> : () -> i64
     "starplat.assign"(%7, %8) : (!starplat.spint, i64) -> ()
     %9 = "starplat.declare2"() <{sym_name = "diff", sym_visibility = "public"}> : () -> !starplat.spfloat
-    "starplat.forallnodes"(%arg0) <{sym_name = "loopa"}> ({
-    ^bb0(%arg5: !starplat.node):
-      "starplat.end"() : () -> ()
-    }) : (!starplat.graph) -> ()
-    %10 = "starplat.const"() <{sym_name = "const_3", sym_visibility = "public", value = 0 : i64}> : () -> i64
-    "starplat.return"(%10) : (i64) -> ()
+    %10 = "starplat.const"() <{sym_name = "const_3", sym_visibility = "private", value = 0.000000e+00 : f64}> : () -> f64
+    "starplat.assign"(%9, %10) : (!starplat.spfloat, f64) -> ()
+    "starplat.dowhile"() <{sym_name = "DoWhile"}> ({
+      %12 = "starplat.const"() <{sym_name = "inc_iterCount", sym_visibility = "private", value = 1 : i64}> : () -> i64
+      "starplat.incassign"(%7, %12) : (!starplat.spint, i64) -> ()
+      %13 = "starplat.cmp"(%9, %arg1) <{op = ">"}> : (!starplat.spfloat, !starplat.spfloat) -> i1
+      %14 = "starplat.cmp"(%7, %arg3) <{op = "<"}> : (!starplat.spint, !starplat.spint) -> i1
+      %15 = "starplat.and"(%13, %14) : (i1, i1) -> i1
+      "starplat.dowhile_cond"(%15) : (i1) -> ()
+    }) : () -> ()
+    %11 = "starplat.const"() <{sym_name = "const_4", sym_visibility = "public", value = 0 : i64}> : () -> i64
+    "starplat.return"(%11) : (i64) -> ()
   }) : () -> ()
 }

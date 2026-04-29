@@ -38,29 +38,37 @@
 #     return 0;
 # }
 
+# function A(Graph g, Node src){
+# forall(v in g.nodes()){
+# for (nbr in g.nodes_to(src)){}
+# }
+# return 0;
+# }
+
 function ComputePageRank(Graph g, float beta, float delta, int maxIter, propNode<float, g> pageRank) {
-    float numNodes = g.num_nodes();
-    propNode<float,g> pageRankNext;
-    g.attachNodeProperty(pageRank = 1 / numNodes, pageRankNext = 0.0);
-    int iterCount = 0;
-    float diff;
-    # do {
-        forall(v in g.nodes()) {
-            # float sum = 0.0;
-            # for (nbr in g.nodes_to(v)) {
-            #     sum = sum + nbr.pageRank / g.count_outNbrs(nbr);
-            # }
-            # float newPageRank = (1 - delta) / numNodes + delta * sum;
-            # if(newPageRank - v.pageRank >= 0) {
-            #     diff += newPageRank - v.pageRank;
-            # } else {
-            #     diff += v.pageRank - newPageRank;
-            # }
-            # v.pageRankNext = newPageRank;
-        }
-        # pageRank = pageRankNext;
-        # iterCount++;
-    # } while ((diff > beta) && (iterCount < maxIter));
+	   float numNodes = g.num_nodes();
+	   propNode<float,g> pageRankNext;
+	   g.attachNodeProperty(pageRank = 1 / numNodes, pageRankNext = 0.0);
+	   int iterCount = 0;
+	   float diff = 0.0;
+	   do {
+	       # forall(v in g.nodes()) {
+	       #     float sum = 0.0;
+	       #     for (nbr in g.nodes_to(v)) {
+	       #         sum = sum + nbr.pageRank / g.count_outNbrs(nbr);
+	       #     }
+	       #     float newPageRank = (1 - delta) / numNodes + delta * sum;
+	       #     if(newPageRank - v.pageRank >= 0) {
+	       #         diff += newPageRank - v.pageRank;
+	       #     } else {
+	       #         diff += v.pageRank - newPageRank;
+	       #     }
+	       #     v.pageRankNext = newPageRank;
+	       # }
+	       # pageRank = pageRankNext; 
+	iterCount++;
+	   } while ((diff > beta) && (iterCount < maxIter));
+	   # } while (iterCount < maxIter);
 
     return 0;
 }
