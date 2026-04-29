@@ -344,6 +344,21 @@ def ForAllNeighboursOp : StarplatBaseOp<"forallneighbours", []>
     }];
 }
 
+def ForNodesToOp : StarplatBaseOp<"for_nodes_to", []>
+{
+    let summary = "For loop over incoming neighbours of a node";
+    let arguments = (ins
+        AnyType:$graph,
+        AnyType:$node,
+        SymbolNameAttr:$sym_name
+    );
+    let regions = (region AnyRegion:$body);
+
+    let extraClassDeclaration = [{
+        BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
+    }];
+}
+
 def NodeCmpOp : StarplatBaseOp<"nodecmp">
 {
     let summary = "Compare two nodes or values";
