@@ -412,12 +412,8 @@ void StarPlatCodeGen::visitForStmt(const ForStatement* forStmt, mlir::SymbolTabl
     }
 
     // Create ForOp
-    mlir::StringAttr loopa                     = builder.getStringAttr("loopa");
-    llvm::SmallVector<mlir::Value> forOperands = {graphSymbol, nodeSymbol};
-    mlir::ArrayAttr loopAttr                   = builder.getArrayAttr({builder.getStringAttr("nodes_to")});
-    mlir::BoolAttr filterAttr                  = builder.getBoolAttr(false);
-
-    auto forOp = mlir::starplat::ForOp::create(builder, builder.getUnknownLoc(), forOperands, loopAttr, filterAttr, loopa);
+    mlir::StringAttr loopa = builder.getStringAttr("loopa");
+    auto forOp = mlir::starplat::ForOp::create(builder, builder.getUnknownLoc(), graphSymbol, nodeSymbol, loopa);
 
     // Set up body block
     auto& loopBlock = forOp.getBody().emplaceBlock();

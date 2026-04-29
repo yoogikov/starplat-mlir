@@ -1,4 +1,4 @@
-"builtin.module"() ({
+module {
   "starplat.func"() <{argNames = ["g", "beta", "delta", "maxIter", "pageRank"], functionType = (!starplat.graph, !starplat.spfloat, !starplat.spfloat, !starplat.spint, !starplat.propNode<f64, "g">) -> i64, sym_name = "ComputePageRank"}> ({
   ^bb0(%arg0: !starplat.graph, %arg1: !starplat.spfloat, %arg2: !starplat.spfloat, %arg3: !starplat.spint, %arg4: !starplat.propNode<f64, "g">):
     %0 = "starplat.declare2"() <{sym_name = "numNodes", sym_visibility = "public"}> : () -> !starplat.spfloat
@@ -16,13 +16,9 @@
     %9 = "starplat.declare2"() <{sym_name = "diff", sym_visibility = "public"}> : () -> !starplat.spfloat
     "starplat.forallnodes"(%arg0) <{sym_name = "loopa"}> ({
     ^bb0(%arg5: !starplat.node):
-      "starplat.for"(%arg0, %arg5) <{filter = false, loopattributes = ["nodes_to"], sym_name = "loopa"}> ({
-      ^bb0(%arg6: !starplat.node):
-        "starplat.end"() : () -> ()
-      }) : (!starplat.graph, !starplat.node) -> ()
       "starplat.end"() : () -> ()
     }) : (!starplat.graph) -> ()
     %10 = "starplat.const"() <{sym_name = "const_3", sym_visibility = "public", value = 0 : i64}> : () -> i64
     "starplat.return"(%10) : (i64) -> ()
   }) : () -> ()
-}) : () -> ()
+}
