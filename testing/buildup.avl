@@ -43,21 +43,21 @@ function ComputePageRank(Graph g, float beta, float delta, int maxIter, propNode
     propNode<float,g> pageRankNext;
     g.attachNodeProperty(pageRank = 1 / numNodes, pageRankNext = 0.0);
     int iterCount = 0;
-    # float diff;
+    float diff;
     # do {
-        # forall(v in g.nodes()) {
-            float sum = 0.0;
-            # for (nbr in g.nodes_to(v)) {
-                sum = sum + nbr.pageRank / g.count_outNbrs(nbr);
+        forall(v in g.nodes()) {
+            # float sum = 0.0;
+            for (nbr in g.nodes_to(v)) {
+                # sum = sum + nbr.pageRank / g.count_outNbrs(nbr);
+            }
+            # float newPageRank = (1 - delta) / numNodes + delta * sum;
+            # if(newPageRank - v.pageRank >= 0) {
+            #     diff += newPageRank - v.pageRank;
+            # } else {
+            #     diff += v.pageRank - newPageRank;
             # }
-    #         float newPageRank = (1 - delta) / numNodes + delta * sum;
-    #         if(newPageRank - v.pageRank >= 0) {
-    #             diff += newPageRank - v.pageRank;
-    #         } else {
-    #             diff += v.pageRank - newPageRank;
-    #         }
-    #         v.pageRankNext = newPageRank;
-        # }
+            # v.pageRankNext = newPageRank;
+        }
         # pageRank = pageRankNext;
         # iterCount++;
     # } while ((diff > beta) && (iterCount < maxIter));
