@@ -1297,6 +1297,15 @@ mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTab
     }
     // llvm::outs() << "resolveExpr: kind = " << expr->getKind() << "\n";
 
+    // basic type inference for return type being a float
+    auto inferType = [&](mlir::Value lhs, mlir::Value rhs) -> mlir::Type {
+        if (mlir::isa<mlir::starplat::SPFloatType>(lhs.getType()) ||
+            mlir::isa<mlir::starplat::SPFloatType>(rhs.getType()) ||
+            lhs.getType().isF64() || rhs.getType().isF64())
+            return builder.getF64Type();
+        return builder.getI64Type(); // default
+    };
+
     switch (expr->getKind()) {
 
     case ExpressionKind::KIND_IDENTIFIER: {
@@ -1425,32 +1434,32 @@ mlir::Value StarPlatCodeGen::resolveExpr(const Expression* expr, mlir::SymbolTab
         return nullptr;
     }
 
-    case ExpressionKind::KIND_ADDOP: {
-        const Add* op = static_cast<const Add*>(expr->getExpression());
-        auto lhs      = resolveExpr(static_cast<const Expression*>(op->getOperand1()), symbolTable);
-        auto rhs      = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
-        if (!lhs || !rhs)
-            return nullptr;
-        return mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), lhs, rhs)->getResult(0);
-    }
+        case ExpressionKind::KIND_ADDOP: {
+            const Add* op = static_cast<const Add*>(expr->getExpression());
+            auto lhs = resolveExpr(static_cast<const Expression*>(op->getOperand1()), symbolTable);
+            auto rhs = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
+            if (!lhs || !rhs) return nullptr;
+            return mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(),
+                inferType(lhs, rhs), lhs, rhs)->getResult(0);
+        }
 
-    case ExpressionKind::KIND_SUBOP: {
-        const Sub* op = static_cast<const Sub*>(expr->getExpression());
-        auto lhs      = resolveExpr(static_cast<const Expression*>(op->getOperand1()), symbolTable);
-        auto rhs      = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
-        if (!lhs || !rhs)
-            return nullptr;
-        return mlir::starplat::SubOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), lhs, rhs)->getResult(0);
-    }
+        case ExpressionKind::KIND_SUBOP: {
+            const Sub* op = static_cast<const Sub*>(expr->getExpression());
+            auto lhs = resolveExpr(static_cast<const Expression*>(op->getOperand1()), symbolTable);
+            auto rhs = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
+            if (!lhs || !rhs) return nullptr;
+            return mlir::starplat::SubOp::create(builder, builder.getUnknownLoc(),
+                inferType(lhs, rhs), lhs, rhs)->getResult(0);
+        }
 
-    case ExpressionKind::KIND_MULOP: {
-        const Mul* op = static_cast<const Mul*>(expr->getExpression());
-        auto lhs      = resolveExpr(static_cast<const Expression*>(op->getOperand1()), symbolTable);
-        auto rhs      = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
-        if (!lhs || !rhs)
-            return nullptr;
-        return mlir::starplat::MulOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(), lhs, rhs)->getResult(0);
-    }
+        case ExpressionKind::KIND_MULOP: {
+            const Mul* op = static_cast<const Mul*>(expr->getExpression());
+            auto lhs = resolveExpr(static_cast<const Expression*>(op->getOperand1()), symbolTable);
+            auto rhs = resolveExpr(static_cast<const Expression*>(op->getOperand2()), symbolTable);
+            if (!lhs || !rhs) return nullptr;
+            return mlir::starplat::MulOp::create(builder, builder.getUnknownLoc(),
+                inferType(lhs, rhs), lhs, rhs)->getResult(0);
+        }
 
     case ExpressionKind::KIND_DIVOP: {
         const Div* op = static_cast<const Div*>(expr->getExpression());
