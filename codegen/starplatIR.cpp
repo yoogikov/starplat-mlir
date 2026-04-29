@@ -753,8 +753,9 @@ void StarPlatCodeGen::visitIncstmt(const Incstmt *incstmt,
       builder.getStringAttr("inc_" +
                             std::string(incstmt->getIdentifier()->getname())),
       builder.getStringAttr("private"));
-  mlir::starplat::IncAndAssignOp::create(builder, builder.getUnknownLoc(),
-                                         lhsSymbol, constOp->getResult(0));
+  mlir::starplat::AddOp::create(builder, builder.getUnknownLoc(),
+                                builder.getI64Type(), lhsSymbol,
+                                constOp->getResult(0));
 }
 
 void StarPlatCodeGen::visitAssignment(const Assignment *assignment,
