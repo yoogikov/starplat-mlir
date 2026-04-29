@@ -53,8 +53,20 @@ void StarPlatCodeGen::visitDeclarationStmt(const DeclarationStatement* dclstmt, 
         // Declaration of the type "type IDENTIFIER EQ NUMBER SEMIC"
         mlir::Value lhs = declareOp;
 
-        mlir::Value rhs = mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(),
-                                                          builder.getI64IntegerAttr(Num->getnumber()), "", builder.getStringAttr("private"));
+        mlir::Value rhs;
+
+        if (Num->isFloat()) {
+            rhs = mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), builder.getF64Type(),
+                                                  builder.getF64FloatAttr(Num->getnumberfloat()), "const_" +
+                                                  to_string(get_const_count()), builder.getStringAttr("private"));
+        }
+
+        else {
+            rhs = mlir::starplat::ConstOp::create(builder, builder.getUnknownLoc(), builder.getI64Type(),
+                                                  builder.getI64IntegerAttr(Num->getnumber()), "const_" +
+                                                  to_string(get_const_count()), builder.getStringAttr("private"));
+        }
+
         mlir::starplat::AssignmentOp::create(builder, builder.getUnknownLoc(), lhs, rhs);
     }
     // llvm::errs() << (num->getnumber());
