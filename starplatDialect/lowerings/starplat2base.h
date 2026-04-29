@@ -158,7 +158,6 @@ struct ConvertDeclareOp : public OpConversionPattern<mlir::starplat::DeclareOp>
         auto resType = op->getResult(0).getType();
         auto ctx     = op.getContext();
         auto loc     = op.getLoc();
-        // resType.dump();
         if (auto pnodetype = dyn_cast<starplat::PropNodeType>(resType)) {
             auto module = op->getParentOfType<mlir::ModuleOp>();
             FailureOr<LLVM::LLVMFuncOp> graphCountNodes =
@@ -169,7 +168,14 @@ struct ConvertDeclareOp : public OpConversionPattern<mlir::starplat::DeclareOp>
             // NOTE: propNode<i1,"g"> is widened to memref<?xi8> at the type-converter level
             // (i1 is not a legal atomicrmw operand type in LLVM IR). Every read/write site
             // inserts the i1<->i8 conversion.
-            auto elemType      = rewriter.getI8Type();
+            // mlir::Type elemType;
+            auto typeParameter  = pnodetype.getParameter();
+            mlir::Type elemType = typeParameter;
+            if (auto intType = mlir::dyn_cast<mlir::IntegerType>(pnodetype.getParameter())) {
+                if (intType.getWidth() == 1) {
+                    elemType = rewriter.getI8Type();
+                }
+            }
             auto arrayType     = MemRefType::get({mlir::ShapedType::kDynamic}, elemType);
             Value sizeIdx      = arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(), num_nodes.getResult());
             auto arrayCreation = memref::AllocaOp::create(rewriter, loc, arrayType, ValueRange{sizeIdx});
@@ -348,6 +354,10 @@ struct ConvertConstOp : public OpConversionPattern<mlir::starplat::ConstOp>
 
         if (isa<mlir::IntegerAttr>(value)) {
             auto newOp = LLVM::ConstantOp::create(rewriter, loc, rewriter.getI64Type(), value);
+            rewriter.replaceOp(op, newOp);
+        }
+        else if (isa<mlir::FloatAttr>(value)) {
+            auto newOp = LLVM::ConstantOp::create(rewriter, loc, rewriter.getF64Type(), value);
             rewriter.replaceOp(op, newOp);
         }
         else if (auto attr = dyn_cast<mlir::StringAttr>(value)) {
@@ -996,6 +1006,64 @@ struct ConvertAdd : public OpConversionPattern<mlir::starplat::AddOp>
     }
 };
 
+struct ConvertDivOp : public OpConversionPattern<mlir::starplat::DivOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::DivOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter& rewriter) const override {
+        auto loc     = op.getLoc();
+        auto dstType = op.getResult().getType();
+
+        // Load a pointer operand using the original StarPlat type to pick the right element type.
+        auto loadIfPtr = [&](Value converted, Type originalType) -> Value {
+            if (!isa<LLVM::LLVMPointerType>(converted.getType()))
+                return converted;
+            Type elemType = isa<starplat::SPFloatType>(originalType) ? (Type)rewriter.getF64Type()
+                                                                      : (Type)rewriter.getI64Type();
+            return LLVM::LoadOp::create(rewriter, loc, elemType, converted).getResult();
+        };
+
+        Value op1 = loadIfPtr(adaptor.getOperands()[0], op.getOperands()[0].getType());
+        Value op2 = loadIfPtr(adaptor.getOperands()[1], op.getOperands()[1].getType());
+
+        // Cast operands to dstType if they don't already match.
+        auto castToResult = [&](Value v) -> Value {
+            if (v.getType() == dstType)
+                return v;
+            if (isa<FloatType>(dstType) && isa<IntegerType>(v.getType()))
+                return arith::SIToFPOp::create(rewriter, loc, dstType, v);
+            if (isa<IntegerType>(dstType) && isa<FloatType>(v.getType()))
+                return arith::FPToSIOp::create(rewriter, loc, dstType, v);
+            if (isa<IntegerType>(dstType) && isa<IntegerType>(v.getType())) {
+                unsigned sw = cast<IntegerType>(v.getType()).getWidth();
+                unsigned dw = cast<IntegerType>(dstType).getWidth();
+                return dw > sw ? (Value)arith::ExtSIOp::create(rewriter, loc, dstType, v)
+                               : (Value)arith::TruncIOp::create(rewriter, loc, dstType, v);
+            }
+            if (isa<FloatType>(dstType) && isa<FloatType>(v.getType())) {
+                unsigned sw = cast<FloatType>(v.getType()).getWidth();
+                unsigned dw = cast<FloatType>(dstType).getWidth();
+                return dw > sw ? (Value)arith::ExtFOp::create(rewriter, loc, dstType, v)
+                               : (Value)arith::TruncFOp::create(rewriter, loc, dstType, v);
+            }
+            return v;
+        };
+
+        op1 = castToResult(op1);
+        op2 = castToResult(op2);
+
+        Value result;
+        if (isa<FloatType>(dstType))
+            result = arith::DivFOp::create(rewriter, loc, op1, op2);
+        else
+            result = arith::DivSIOp::create(rewriter, loc, op1, op2);
+
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
+
 struct ConvertReturnOp : public OpConversionPattern<mlir::starplat::ReturnOp>
 {
     using OpConversionPattern::OpConversionPattern;
@@ -1361,6 +1429,26 @@ struct ConvertStoreOp : public OpConversionPattern<mlir::starplat::StoreOp>
             return success();
         }
 
+        // ── Case 4: dst is llvm.ptr (spfloat), src is a float ───────────────
+        // !starplat.spfloat lowered to !llvm.ptr (pointing at f64).
+        // Widen / narrow to f64 as needed, then store.
+        if (isa<LLVM::LLVMPointerType>(dstType) && isa<FloatType>(srcType)) {
+            auto f64Ty         = rewriter.getF64Type();
+            Value valueToStore = src;
+
+            if (srcType != f64Ty) {
+                unsigned srcWidth = cast<FloatType>(srcType).getWidth();
+                if (srcWidth < 64)
+                    valueToStore = arith::ExtFOp::create(rewriter, loc, f64Ty, src);
+                else
+                    valueToStore = arith::TruncFOp::create(rewriter, loc, f64Ty, src);
+            }
+
+            LLVM::StoreOp::create(rewriter, loc, valueToStore, dst);
+            rewriter.eraseOp(op);
+            return success();
+        }
+
         return rewriter.notifyMatchFailure(op, "unhandled StoreOp operand type combination after conversion");
     }
 };
@@ -1576,33 +1664,33 @@ struct ConvertNumNodesOp : public OpConversionPattern<mlir::starplat::NumNodesOp
 {
     using OpConversionPattern<mlir::starplat::NumNodesOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(mlir::starplat::NumNodesOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter& rewriter) const override {
-        auto loc    = op.getLoc();
-        auto ctx    = op.getContext();
-        auto module = op->getParentOfType<mlir::ModuleOp>();
+    LogicalResult matchAndRewrite(mlir::starplat::NumNodesOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc                                  = op.getLoc();
+        auto ctx                                  = op.getContext();
+        auto module                               = op->getParentOfType<mlir::ModuleOp>();
 
-        auto ptrTy = LLVM::LLVMPointerType::get(ctx);
-        auto i32Ty = rewriter.getI32Type();
+        auto ptrTy                                = LLVM::LLVMPointerType::get(ctx);
+        auto i32Ty                                = rewriter.getI32Type();
 
-        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn =
-            LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
+        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn = LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
         if (failed(getNumNodesFn))
             return rewriter.notifyMatchFailure(op, "failed to declare get_num_nodes");
 
-        Value graphPtr = adaptor.getOperands()[0];
-        Value nI32     = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
+        Value graphPtr  = adaptor.getOperands()[0];
+        Value nI32      = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
 
         auto resultType = op.getResult().getType();
         Value result;
         if (resultType == i32Ty) {
             result = nI32;
-        } else if (auto intTy = dyn_cast<IntegerType>(resultType)) {
+        }
+        else if (auto intTy = dyn_cast<IntegerType>(resultType)) {
             if (intTy.getWidth() > 32)
                 result = arith::ExtSIOp::create(rewriter, loc, resultType, nI32);
             else
                 result = arith::TruncIOp::create(rewriter, loc, resultType, nI32);
-        } else {
+        }
+        else {
             return rewriter.notifyMatchFailure(op, "unsupported num_nodes result type");
         }
 
@@ -1615,8 +1703,7 @@ struct ConvertCastOp : public OpConversionPattern<mlir::starplat::CastOp>
 {
     using OpConversionPattern<mlir::starplat::CastOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(mlir::starplat::CastOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter& rewriter) const override {
+    LogicalResult matchAndRewrite(mlir::starplat::CastOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
         auto loc     = op.getLoc();
         Value input  = adaptor.getOperands()[0];
         auto srcType = input.getType();
@@ -1635,23 +1722,27 @@ struct ConvertCastOp : public OpConversionPattern<mlir::starplat::CastOp>
         Value result;
         if (srcIsInt && dstIsFloat) {
             result = arith::SIToFPOp::create(rewriter, loc, dstType, input);
-        } else if (srcIsFloat && dstIsInt) {
+        }
+        else if (srcIsFloat && dstIsInt) {
             result = arith::FPToSIOp::create(rewriter, loc, dstType, input);
-        } else if (srcIsInt && dstIsInt) {
+        }
+        else if (srcIsInt && dstIsInt) {
             unsigned srcW = cast<IntegerType>(srcType).getWidth();
             unsigned dstW = cast<IntegerType>(dstType).getWidth();
             if (dstW > srcW)
                 result = arith::ExtSIOp::create(rewriter, loc, dstType, input);
             else
                 result = arith::TruncIOp::create(rewriter, loc, dstType, input);
-        } else if (srcIsFloat && dstIsFloat) {
+        }
+        else if (srcIsFloat && dstIsFloat) {
             unsigned srcW = cast<FloatType>(srcType).getWidth();
             unsigned dstW = cast<FloatType>(dstType).getWidth();
             if (dstW > srcW)
                 result = arith::ExtFOp::create(rewriter, loc, dstType, input);
             else
                 result = arith::TruncFOp::create(rewriter, loc, dstType, input);
-        } else {
+        }
+        else {
             return rewriter.notifyMatchFailure(op, "unsupported cast type combination");
         }
 
@@ -1713,6 +1804,7 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         target.addIllegalOp<mlir::starplat::ForAllNodesOp>();
         target.addIllegalOp<mlir::starplat::NumNodesOp>();
         target.addIllegalOp<mlir::starplat::CastOp>();
+        target.addIllegalOp<mlir::starplat::DivOp>();
 
         // target.addIllegalOp<mlir::starplat::SetNodePropertyOp>();
         // target.addIllegalOp<mlir::starplat::FixedPointUntilOp>();
@@ -1744,6 +1836,7 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         patterns.add<ConvertReturnOp>(typeConverter, context);
         patterns.add<ConvertNumNodesOp>(typeConverter, context);
         patterns.add<ConvertCastOp>(typeConverter, context);
+        patterns.add<ConvertDivOp>(context);
 
         // populateFunctionOpInterfaceTypeConversionPattern<mlir::starplat::FuncOp>(patterns, typeConverter);
         // target.addDynamicallyLegalOp<mlir::starplat::FuncOp>([&](starplat::FuncOp op)
