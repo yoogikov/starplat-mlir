@@ -267,20 +267,20 @@ def GetEdgePropertyOp : StarplatBaseOp<"getEdgeProperty">
 
  }
 
- def ForOp : StarplatBaseOp<"for", [SymbolTable, Symbol]>
+ def ForOp : StarplatBaseOp<"for", []>
  {
-    let summary = "For loop";
-    let description = [{"For operation description."}];
-
-    let arguments = ( ins 
-                      Variadic<AnyType> : $arguments,
-                      OptionalAttr<ArrayAttr> : $loopattributes,
-                      BoolAttr : $filter,
-                      SymbolNameAttr:$sym_name
-                    );
-    
+    let summary = "For loop over nodes up to a given node";
+    let arguments = (ins
+        AnyType:$graph,
+        AnyType:$node,
+        OptionalAttr<StrAttr>:$sym_name
+    );
     let regions = (region AnyRegion:$body);
- } 
+
+    let extraClassDeclaration = [{
+        BlockArgument getInductionVar() { return getBody().front().getArgument(0); }
+    }];
+ }
 
  def ForAllOp : StarplatBaseOp<"forall", [SymbolTable, Symbol]>
  {

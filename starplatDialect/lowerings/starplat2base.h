@@ -158,7 +158,6 @@ struct ConvertDeclareOp : public OpConversionPattern<mlir::starplat::DeclareOp>
         auto resType = op->getResult(0).getType();
         auto ctx     = op.getContext();
         auto loc     = op.getLoc();
-        // resType.dump();
         if (auto pnodetype = dyn_cast<starplat::PropNodeType>(resType)) {
             auto module = op->getParentOfType<mlir::ModuleOp>();
             FailureOr<LLVM::LLVMFuncOp> graphCountNodes =
@@ -169,7 +168,14 @@ struct ConvertDeclareOp : public OpConversionPattern<mlir::starplat::DeclareOp>
             // NOTE: propNode<i1,"g"> is widened to memref<?xi8> at the type-converter level
             // (i1 is not a legal atomicrmw operand type in LLVM IR). Every read/write site
             // inserts the i1<->i8 conversion.
-            auto elemType      = rewriter.getI8Type();
+            // mlir::Type elemType;
+            auto typeParameter  = pnodetype.getParameter();
+            mlir::Type elemType = typeParameter;
+            if (auto intType = mlir::dyn_cast<mlir::IntegerType>(pnodetype.getParameter())) {
+                if (intType.getWidth() == 1) {
+                    elemType = rewriter.getI8Type();
+                }
+            }
             auto arrayType     = MemRefType::get({mlir::ShapedType::kDynamic}, elemType);
             Value sizeIdx      = arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(), num_nodes.getResult());
             auto arrayCreation = memref::AllocaOp::create(rewriter, loc, arrayType, ValueRange{sizeIdx});
@@ -348,6 +354,10 @@ struct ConvertConstOp : public OpConversionPattern<mlir::starplat::ConstOp>
 
         if (isa<mlir::IntegerAttr>(value)) {
             auto newOp = LLVM::ConstantOp::create(rewriter, loc, rewriter.getI64Type(), value);
+            rewriter.replaceOp(op, newOp);
+        }
+        else if (isa<mlir::FloatAttr>(value)) {
+            auto newOp = LLVM::ConstantOp::create(rewriter, loc, rewriter.getF64Type(), value);
             rewriter.replaceOp(op, newOp);
         }
         else if (auto attr = dyn_cast<mlir::StringAttr>(value)) {
@@ -570,7 +580,8 @@ static bool isOutermostStarplatForall(Operation* op) {
 }
 
 static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewriter& rewriter, Value convertedGraphPtr, Value convertedNodePtrOrNull) {
-    auto loc = op->getLoc();
+    auto loc    = op->getLoc();
+    ModuleOp module = op->getParentOfType<ModuleOp>();
 
     // Walk transitively — IncAndAssignOp may sit inside any mix of nested
     // forall levels and wrapper ops (StarPlatIfOp, etc) in the outermost
@@ -582,13 +593,15 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
             if (!reductionOp)
                 reductionOp = inc;
         });
-    bool hasReduction = reductionOp != nullptr;
+    bool hasReduction     = reductionOp != nullptr;
+    bool reductionIsFloat = hasReduction && isa<starplat::SPFloatType>(reductionOp->getOperand(0).getType());
 
     Value initVal;
     Value reductionPtr;
     if (hasReduction) {
-        reductionPtr = rewriter.getRemappedValue(reductionOp->getOperand(0));
-        initVal      = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), reductionPtr);
+        reductionPtr     = rewriter.getRemappedValue(reductionOp->getOperand(0));
+        Type reductionTy = reductionIsFloat ? (Type)rewriter.getF64Type() : (Type)rewriter.getI64Type();
+        initVal          = LLVM::LoadOp::create(rewriter, loc, reductionTy, reductionPtr);
     }
 
     auto outerPlanOr = planForallLoop(op, rewriter, loc, convertedGraphPtr, convertedNodePtrOrNull);
@@ -613,7 +626,9 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
         Value outerBodyArg = outerPlan.materializeBodyArg(rewriter, loc, parallelOp.getInductionVars()[0]);
         mapping.map(op->getRegion(0).front().getArgument(0), outerBodyArg);
 
-        Value zero = arith::ConstantOp::create(rewriter, loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(0));
+        Value zero = reductionIsFloat
+                         ? (Value)arith::ConstantOp::create(rewriter, loc, rewriter.getF64Type(), rewriter.getF64FloatAttr(0.0))
+                         : (Value)arith::ConstantOp::create(rewriter, loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(0));
 
         // cloneBlock: walks a source block and emits it at the current
         // insertion point, seeing through region-bearing wrapper ops and
@@ -645,7 +660,8 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
 
                 if (isa<starplat::IncAndAssignOp>(bodyOp)) {
                     Value delta = mapping.lookupOrDefault(bodyOp.getOperand(1));
-                    iterArg     = arith::AddIOp::create(rewriter, loc, iterArg, delta);
+                    iterArg     = isa<FloatType>(iterArg.getType()) ? (Value)arith::AddFOp::create(rewriter, loc, iterArg, delta)
+                                                                    : (Value)arith::AddIOp::create(rewriter, loc, iterArg, delta);
                     continue;
                 }
 
@@ -702,6 +718,68 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
                     continue;
                 }
 
+                // for_nodes_to: always lower to a sequential scf.for over
+                // in-neighbours, threading iter_args when a reduction is present.
+                if (auto fnto = dyn_cast<starplat::ForNodesToOp>(&bodyOp)) {
+                    bool containsReduction = false;
+                    if (hasReduction)
+                        fnto->walk([&](starplat::IncAndAssignOp) { containsReduction = true; });
+
+                    auto* ctx  = rewriter.getContext();
+                    auto ptrTy = LLVM::LLVMPointerType::get(ctx);
+                    auto i32Ty = rewriter.getI32Type();
+                    auto i64Ty = rewriter.getI64Type();
+                    auto idxTy = rewriter.getIndexType();
+
+                    Value nestedGraphPtr = resolveNestedOperand(fnto->getOperand(0), mapping, rewriter);
+                    Value nestedNodePtr  = resolveNestedOperand(fnto->getOperand(1), mapping, rewriter);
+
+                    FailureOr<LLVM::LLVMFuncOp> getNumInNbrsFn =
+                        LLVM::lookupOrCreateFn(rewriter, module, "get_num_in_neighbours", {ptrTy, i32Ty}, i32Ty);
+                    FailureOr<LLVM::LLVMFuncOp> getInNbrsFn =
+                        LLVM::lookupOrCreateFn(rewriter, module, "get_in_neighbours", {ptrTy, i32Ty}, ptrTy);
+                    if (failed(getNumInNbrsFn) || failed(getInNbrsFn))
+                        continue;
+
+                    Value nodeId    = LLVM::LoadOp::create(rewriter, loc, i32Ty, nestedNodePtr);
+                    Value nI32      = LLVM::CallOp::create(rewriter, loc, *getNumInNbrsFn, ValueRange{nestedGraphPtr, nodeId}).getResult();
+                    Value nIdx      = arith::IndexCastOp::create(rewriter, loc, idxTy, nI32);
+                    Value inNbrsPtr = LLVM::CallOp::create(rewriter, loc, *getInNbrsFn, ValueRange{nestedGraphPtr, nodeId}).getResult();
+                    Value oneI32    = LLVM::ConstantOp::create(rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+
+                    auto materialize = [&](OpBuilder& b, Location l, Value iv) -> Value {
+                        Value ivI64    = arith::IndexCastOp::create(b, l, i64Ty, iv);
+                        Value elemAddr = LLVM::GEPOp::create(b, l, ptrTy, i32Ty, inNbrsPtr,
+                                                              ArrayRef<LLVM::GEPArg>{LLVM::GEPArg(ivI64)});
+                        Value vI32     = LLVM::LoadOp::create(b, l, i32Ty, elemAddr);
+                        Value slot     = LLVM::AllocaOp::create(b, l, ptrTy, i32Ty, oneI32, /*alignment=*/0);
+                        LLVM::StoreOp::create(b, l, vI32, slot);
+                        return slot;
+                    };
+
+                    if (containsReduction) {
+                        auto forOp = scf::ForOp::create(rewriter, loc, zeroIdx, nIdx, oneIdx, ValueRange{iterArg});
+                        OpBuilder::InsertionGuard fg(rewriter);
+                        rewriter.setInsertionPointToStart(forOp.getBody());
+                        Value argPtr   = materialize(rewriter, loc, forOp.getInductionVar());
+                        mapping.map(fnto->getRegion(0).front().getArgument(0), argPtr);
+                        Value innerIter = forOp.getRegionIterArgs()[0];
+                        cloneBlock(&fnto->getRegion(0).front(), innerIter);
+                        scf::YieldOp::create(rewriter, loc, ValueRange{innerIter});
+                        iterArg = forOp.getResult(0);
+                    }
+                    else {
+                        auto forOp = scf::ForOp::create(rewriter, loc, zeroIdx, nIdx, oneIdx);
+                        OpBuilder::InsertionGuard fg(rewriter);
+                        rewriter.setInsertionPointToStart(forOp.getBody());
+                        Value argPtr = materialize(rewriter, loc, forOp.getInductionVar());
+                        mapping.map(fnto->getRegion(0).front().getArgument(0), argPtr);
+                        Value dummy;
+                        cloneBlock(&fnto->getRegion(0).front(), dummy);
+                    }
+                    continue;
+                }
+
                 // Other region-bearing wrappers: either promote spif to
                 // scf.if (on the reduction path) or clone the shell and
                 // recurse.
@@ -735,6 +813,27 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
                         continue;
                     }
 
+                    if (auto spifelse = dyn_cast<starplat::StarPlatIfElseOp>(&bodyOp); spifelse && containsReduction) {
+                        Value cond = mapping.lookupOrDefault(spifelse.getCondition());
+                        auto ifOp  = scf::IfOp::create(rewriter, loc, TypeRange{iterArg.getType()}, cond, /*withElseRegion=*/true);
+                        {
+                            OpBuilder::InsertionGuard g(rewriter);
+                            rewriter.setInsertionPointToStart(ifOp.thenBlock());
+                            Value thenIter = iterArg;
+                            cloneBlock(&spifelse.getIfBody().front(), thenIter);
+                            scf::YieldOp::create(rewriter, loc, ValueRange{thenIter});
+                        }
+                        {
+                            OpBuilder::InsertionGuard g(rewriter);
+                            rewriter.setInsertionPointToStart(ifOp.elseBlock());
+                            Value elseIter = iterArg;
+                            cloneBlock(&spifelse.getElseBody().front(), elseIter);
+                            scf::YieldOp::create(rewriter, loc, ValueRange{elseIter});
+                        }
+                        iterArg = ifOp.getResult(0);
+                        continue;
+                    }
+
                     // Non-reduction wrapper: build the shell via
                     // OperationState (cloning the whole op and clearing
                     // regions would bypass the ConversionPatternRewriter's
@@ -760,10 +859,10 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
                                 argTypes.push_back(arg.getType());
                                 argLocs.push_back(arg.getLoc());
                             }
+                            OpBuilder::InsertionGuard wg(rewriter);
                             Block* clonedBlk = rewriter.createBlock(&clonedRegion, clonedRegion.end(), argTypes, argLocs);
                             for (auto [origArg, clonedArg] : llvm::zip(origBlk.getArguments(), clonedBlk->getArguments()))
                                 mapping.map(origArg, clonedArg);
-                            OpBuilder::InsertionGuard wg(rewriter);
                             rewriter.setInsertionPointToStart(clonedBlk);
                             cloneBlock(&origBlk, iterArg);
                         }
@@ -785,7 +884,10 @@ static LogicalResult lowerOutermostForall(Operation* op, ConversionPatternRewrit
             Block& rb     = reduceOp.getReductions()[0].front();
             OpBuilder::InsertionGuard rg(rewriter);
             rewriter.setInsertionPointToStart(&rb);
-            Value sum = arith::AddIOp::create(rewriter, loc, rb.getArgument(0), rb.getArgument(1));
+            Value a = rb.getArgument(0);
+            Value b = rb.getArgument(1);
+            Value sum =
+                isa<FloatType>(a.getType()) ? (Value)arith::AddFOp::create(rewriter, loc, a, b) : (Value)arith::AddIOp::create(rewriter, loc, a, b);
             scf::ReduceReturnOp::create(rewriter, loc, sum);
         }
     }
@@ -808,6 +910,66 @@ struct ForallNodesOpLoweringCPU : public OpConversionPattern<starplat::ForAllNod
             return failure();
         Value graphPtr = adaptor.getOperands()[0];
         return lowerOutermostForall(op, rewriter, graphPtr, /*nodePtr=*/nullptr);
+    }
+};
+
+// Outermost starplat.for_nodes_to -> sequential scf.for over in-neighbours.
+// When nested inside a forall, cloneBlock handles it directly instead.
+struct ForNodesToOpLoweringCPU : public OpConversionPattern<starplat::ForNodesToOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(starplat::ForNodesToOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc    = op.getLoc();
+        auto* ctx   = rewriter.getContext();
+        auto ptrTy  = LLVM::LLVMPointerType::get(ctx);
+        auto i32Ty  = rewriter.getI32Type();
+        auto i64Ty  = rewriter.getI64Type();
+        auto idxTy  = rewriter.getIndexType();
+        ModuleOp module = op->getParentOfType<ModuleOp>();
+
+        Value graphPtr = adaptor.getOperands()[0];
+        Value nodePtr  = adaptor.getOperands()[1];
+
+        FailureOr<LLVM::LLVMFuncOp> getNumInNbrsFn =
+            LLVM::lookupOrCreateFn(rewriter, module, "get_num_in_neighbours", {ptrTy, i32Ty}, i32Ty);
+        FailureOr<LLVM::LLVMFuncOp> getInNbrsFn =
+            LLVM::lookupOrCreateFn(rewriter, module, "get_in_neighbours", {ptrTy, i32Ty}, ptrTy);
+        if (failed(getNumInNbrsFn) || failed(getInNbrsFn))
+            return failure();
+
+        Value nodeId    = LLVM::LoadOp::create(rewriter, loc, i32Ty, nodePtr);
+        Value nI32      = LLVM::CallOp::create(rewriter, loc, *getNumInNbrsFn, ValueRange{graphPtr, nodeId}).getResult();
+        Value nIdx      = arith::IndexCastOp::create(rewriter, loc, idxTy, nI32);
+        Value inNbrsPtr = LLVM::CallOp::create(rewriter, loc, *getInNbrsFn, ValueRange{graphPtr, nodeId}).getResult();
+        Value zeroIdx   = arith::ConstantIndexOp::create(rewriter, loc, 0);
+        Value oneIdx    = arith::ConstantIndexOp::create(rewriter, loc, 1);
+        Value oneI32    = LLVM::ConstantOp::create(rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+
+        auto seqFor = scf::ForOp::create(rewriter, loc, zeroIdx, nIdx, oneIdx);
+
+        OpBuilder::InsertionGuard g(rewriter);
+        rewriter.setInsertionPointToStart(seqFor.getBody());
+
+        Value iv       = seqFor.getInductionVar();
+        Value ivI64    = arith::IndexCastOp::create(rewriter, loc, i64Ty, iv);
+        Value elemAddr = LLVM::GEPOp::create(rewriter, loc, ptrTy, i32Ty, inNbrsPtr,
+                                              ArrayRef<LLVM::GEPArg>{LLVM::GEPArg(ivI64)});
+        Value vI32     = LLVM::LoadOp::create(rewriter, loc, i32Ty, elemAddr);
+        Value slot     = LLVM::AllocaOp::create(rewriter, loc, ptrTy, i32Ty, oneI32, /*alignment=*/0);
+        LLVM::StoreOp::create(rewriter, loc, vI32, slot);
+
+        IRMapping mapping;
+        mapping.map(op.getBody().front().getArgument(0), slot);
+
+        for (auto& bodyOp : op.getBody().front()) {
+            if (isa<starplat::endOp>(bodyOp))
+                continue;
+            rewriter.clone(bodyOp, mapping);
+        }
+
+        rewriter.eraseOp(op);
+        return success();
     }
 };
 
@@ -860,6 +1022,90 @@ struct ConvertIfOp : public OpConversionPattern<mlir::starplat::StarPlatIfOp>
     }
 };
 
+struct ConvertIfElseOp : public OpConversionPattern<mlir::starplat::StarPlatIfElseOp>
+{
+    using OpConversionPattern<mlir::starplat::StarPlatIfElseOp>::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::StarPlatIfElseOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc       = op.getLoc();
+        auto ifop      = scf::IfOp::create(rewriter, loc, TypeRange{}, op.getCondition(), /*withElseRegion=*/true);
+
+        auto moveBlock = [&](Block& src, Block* dst)
+        {
+            rewriter.setInsertionPoint(dst->getTerminator());
+            for (auto& innerOp : llvm::make_early_inc_range(src)) {
+                if (isa<starplat::endOp>(&innerOp)) {
+                    rewriter.eraseOp(&innerOp);
+                    continue;
+                }
+                rewriter.moveOpBefore(&innerOp, dst->getTerminator());
+            }
+        };
+
+        moveBlock(op.getIfBody().front(), ifop.thenBlock());
+        moveBlock(op.getElseBody().front(), ifop.elseBlock());
+
+        rewriter.eraseOp(op);
+        return success();
+    }
+};
+
+struct ConvertDoWhileOp : public OpConversionPattern<mlir::starplat::DoWhileOp>
+{
+    using OpConversionPattern<mlir::starplat::DoWhileOp>::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::DoWhileOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc = op.getLoc();
+
+        // Find the DoWhileCondOp terminator and capture its condition value before any IR changes.
+        Block& bodyBlock = op.getBody().front();
+        mlir::starplat::DoWhileCondOp condOp = nullptr;
+        for (Operation& innerOp : bodyBlock) {
+            if (auto c = dyn_cast<mlir::starplat::DoWhileCondOp>(&innerOp)) {
+                condOp = c;
+                break;
+            }
+        }
+        if (!condOp)
+            return rewriter.notifyMatchFailure(op, "no dowhile_cond terminator found");
+
+        Value condVal = condOp.getCondition();
+
+        // Build scf.while with a single i1 iter-arg initialised to true so the
+        // body always executes on the first iteration (do-while semantics).
+        Value trueVal = arith::ConstantOp::create(rewriter, loc, rewriter.getI1Type(), rewriter.getBoolAttr(true));
+        auto whileOp  = scf::WhileOp::create(rewriter, loc, /*resultTypes=*/TypeRange{}, /*operands=*/ValueRange{trueVal});
+
+        // Before region: gate on the iter-arg from the previous iteration.
+        Block* beforeBlock = rewriter.createBlock(&whileOp.getBefore(), whileOp.getBefore().end(),
+                                                  TypeRange{rewriter.getI1Type()}, ArrayRef<Location>{loc});
+        {
+            OpBuilder::InsertionGuard g(rewriter);
+            rewriter.setInsertionPointToStart(beforeBlock);
+            scf::ConditionOp::create(rewriter, loc, beforeBlock->getArgument(0), ValueRange{});
+        }
+
+        // After region: all body ops (except dowhile_cond) followed by scf.yield(%condVal).
+        Block* afterBlock = rewriter.createBlock(&whileOp.getAfter());
+        {
+            OpBuilder::InsertionGuard g(rewriter);
+            rewriter.setInsertionPointToStart(afterBlock);
+            // Create the yield first so we have a fixed insertion target.
+            auto yieldOp = scf::YieldOp::create(rewriter, loc, ValueRange{condVal});
+            for (auto& innerOp : llvm::make_early_inc_range(bodyBlock)) {
+                if (isa<mlir::starplat::DoWhileCondOp>(&innerOp)) {
+                    rewriter.eraseOp(&innerOp);
+                    continue;
+                }
+                rewriter.moveOpBefore(&innerOp, yieldOp);
+            }
+        }
+
+        rewriter.eraseOp(op);
+        return success();
+    }
+};
+
 struct ConvertNodeCmpOp : public OpConversionPattern<mlir::starplat::CmpOp>
 {
     using OpConversionPattern::OpConversionPattern;
@@ -867,32 +1113,66 @@ struct ConvertNodeCmpOp : public OpConversionPattern<mlir::starplat::CmpOp>
     LogicalResult matchAndRewrite(mlir::starplat::CmpOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
         Location loc = op.getLoc();
 
-        Value lhs    = adaptor.getOperands()[0];
-        Value rhs    = adaptor.getOperands()[1];
-
-        // A starplat.node lowers to !llvm.ptr holding the i32 index. If the
-        // (converted) operand is a pointer, dereference to the i32 index.
-        // (We can't rely on op->getOperand(i).getType() being a NodeType —
-        // when this op is the product of cloneBlock inside an outer forall
-        // lowering, the operand type is already !llvm.ptr.)
-        auto derefIfPtr = [&](Value v) -> Value
+        // Dereference pointer operands using the original StarPlat type to pick
+        // the right element type: SPFloat → f64, SPInt → i64, Node → i32.
+        auto derefIfPtr = [&](Value converted, Type originalType) -> Value
         {
-            if (isa<LLVM::LLVMPointerType>(v.getType()))
-                return LLVM::LoadOp::create(rewriter, loc, rewriter.getI32Type(), v);
-            return v;
+            if (!isa<LLVM::LLVMPointerType>(converted.getType()))
+                return converted;
+            if (isa<starplat::SPFloatType>(originalType))
+                return LLVM::LoadOp::create(rewriter, loc, rewriter.getF64Type(), converted);
+            if (isa<starplat::SPIntType>(originalType))
+                return LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), converted);
+            return LLVM::LoadOp::create(rewriter, loc, rewriter.getI32Type(), converted);
         };
 
-        Value lhsVal = derefIfPtr(lhs);
-        Value rhsVal = derefIfPtr(rhs);
+        Value lhsVal      = derefIfPtr(adaptor.getOperands()[0], op.getOperands()[0].getType());
+        Value rhsVal      = derefIfPtr(adaptor.getOperands()[1], op.getOperands()[1].getType());
 
-        // Sanity: both sides must now be the same integer type for arith.cmpi.
-        // If one side was a node (now i32) and the other was, say, i64, widen.
+        StringRef predStr = mlir::cast<mlir::StringAttr>(op->getAttr("op")).getValue();
+
+        bool eitherFloat  = isa<FloatType>(lhsVal.getType()) || isa<FloatType>(rhsVal.getType());
+
+        if (eitherFloat) {
+            // Promote both sides to the wider float type.
+            Type f64Ty   = rewriter.getF64Type();
+            auto toFloat = [&](Value v) -> Value
+            {
+                if (isa<IntegerType>(v.getType()))
+                    return arith::SIToFPOp::create(rewriter, loc, f64Ty, v);
+                if (isa<FloatType>(v.getType()) && v.getType() != f64Ty)
+                    return arith::ExtFOp::create(rewriter, loc, f64Ty, v);
+                return v;
+            };
+            lhsVal = toFloat(lhsVal);
+            rhsVal = toFloat(rhsVal);
+
+            arith::CmpFPredicate pred;
+            if (predStr == "==")
+                pred = arith::CmpFPredicate::OEQ;
+            else if (predStr == "!=")
+                pred = arith::CmpFPredicate::ONE;
+            else if (predStr == "<")
+                pred = arith::CmpFPredicate::OLT;
+            else if (predStr == "<=")
+                pred = arith::CmpFPredicate::OLE;
+            else if (predStr == ">")
+                pred = arith::CmpFPredicate::OGT;
+            else if (predStr == ">=")
+                pred = arith::CmpFPredicate::OGE;
+            else
+                return rewriter.notifyMatchFailure(op, "unknown cmp predicate string: " + predStr);
+
+            rewriter.replaceOp(op, arith::CmpFOp::create(rewriter, loc, pred, lhsVal, rhsVal));
+            return success();
+        }
+
+        // Integer path — widen to the wider of the two types.
         if (lhsVal.getType() != rhsVal.getType()) {
             auto lhsIntTy = dyn_cast<IntegerType>(lhsVal.getType());
             auto rhsIntTy = dyn_cast<IntegerType>(rhsVal.getType());
-            if (!lhsIntTy || !rhsIntTy) {
+            if (!lhsIntTy || !rhsIntTy)
                 return rewriter.notifyMatchFailure(op, "cmp operands must be integer-like after deref");
-            }
             unsigned targetW = std::max(lhsIntTy.getWidth(), rhsIntTy.getWidth());
             Type targetTy    = rewriter.getIntegerType(targetW);
             if (lhsIntTy.getWidth() < targetW)
@@ -900,10 +1180,6 @@ struct ConvertNodeCmpOp : public OpConversionPattern<mlir::starplat::CmpOp>
             if (rhsIntTy.getWidth() < targetW)
                 rhsVal = arith::ExtSIOp::create(rewriter, loc, targetTy, rhsVal);
         }
-
-        // Map starplat predicate to arith::CmpIPredicate.
-        // Adjust the accessor (getPredicate / getCmpType / etc.) to match your ODS.
-        StringRef predStr = mlir::cast<mlir::StringAttr>(op->getAttr("op")).getValue();
 
         arith::CmpIPredicate pred;
         if (predStr == "==")
@@ -918,12 +1194,10 @@ struct ConvertNodeCmpOp : public OpConversionPattern<mlir::starplat::CmpOp>
             pred = arith::CmpIPredicate::sgt;
         else if (predStr == ">=")
             pred = arith::CmpIPredicate::sge;
-        else {
+        else
             return rewriter.notifyMatchFailure(op, "unknown cmp predicate string: " + predStr);
-        }
 
-        Value cmp = arith::CmpIOp::create(rewriter, loc, pred, lhsVal, rhsVal);
-        rewriter.replaceOp(op, cmp);
+        rewriter.replaceOp(op, arith::CmpIOp::create(rewriter, loc, pred, lhsVal, rhsVal));
         return success();
     }
 };
@@ -964,34 +1238,141 @@ struct ConvertIncAndAssign : public OpConversionPattern<mlir::starplat::IncAndAs
     }
 };
 
+// Shared helpers used by ConvertAdd / ConvertSubOp / ConvertMulOp.
+// Load a pointer operand, choosing elem type from the original StarPlat type.
+static Value loadIfPtr(ConversionPatternRewriter& rewriter, Location loc, Value converted, Type originalType) {
+    if (!isa<LLVM::LLVMPointerType>(converted.getType()))
+        return converted;
+    Type elemType = isa<starplat::SPFloatType>(originalType) ? (Type)rewriter.getF64Type() : (Type)rewriter.getI64Type();
+    return LLVM::LoadOp::create(rewriter, loc, elemType, converted).getResult();
+}
+
+// Cast v to dstType (int<->float, widen/narrow integers, widen/narrow floats).
+static Value castToType(ConversionPatternRewriter& rewriter, Location loc, Value v, Type dstType) {
+    if (v.getType() == dstType)
+        return v;
+    if (isa<FloatType>(dstType) && isa<IntegerType>(v.getType()))
+        return arith::SIToFPOp::create(rewriter, loc, dstType, v);
+    if (isa<IntegerType>(dstType) && isa<FloatType>(v.getType()))
+        return arith::FPToSIOp::create(rewriter, loc, dstType, v);
+    if (isa<IntegerType>(dstType) && isa<IntegerType>(v.getType())) {
+        unsigned sw = cast<IntegerType>(v.getType()).getWidth();
+        unsigned dw = cast<IntegerType>(dstType).getWidth();
+        return dw > sw ? (Value)arith::ExtSIOp::create(rewriter, loc, dstType, v) : (Value)arith::TruncIOp::create(rewriter, loc, dstType, v);
+    }
+    if (isa<FloatType>(dstType) && isa<FloatType>(v.getType())) {
+        unsigned sw = cast<FloatType>(v.getType()).getWidth();
+        unsigned dw = cast<FloatType>(dstType).getWidth();
+        return dw > sw ? (Value)arith::ExtFOp::create(rewriter, loc, dstType, v) : (Value)arith::TruncFOp::create(rewriter, loc, dstType, v);
+    }
+    return v;
+}
+
 struct ConvertAdd : public OpConversionPattern<mlir::starplat::AddOp>
 {
     using OpConversionPattern::OpConversionPattern;
 
     LogicalResult matchAndRewrite(mlir::starplat::AddOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
-        auto loc      = op.getLoc();
-        auto operand1 = adaptor.getOperands()[0];
-        // operand1.getType().dump();
-        auto operand2 = adaptor.getOperands()[1];
+        auto loc     = op.getLoc();
+        auto dstType = op.getResult().getType();
 
-        if (isa<LLVM::LLVMPointerType>(operand1.getType())) {
-            auto loadOp1 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand1);
-            operand1     = loadOp1.getResult();
-        }
+        Value op1    = loadIfPtr(rewriter, loc, adaptor.getOperands()[0], op.getOperands()[0].getType());
+        Value op2    = loadIfPtr(rewriter, loc, adaptor.getOperands()[1], op.getOperands()[1].getType());
+        op1          = castToType(rewriter, loc, op1, dstType);
+        op2          = castToType(rewriter, loc, op2, dstType);
 
-        if (isa<LLVM::LLVMPointerType>(operand2.getType())) {
-            auto loadOp2 = LLVM::LoadOp::create(rewriter, loc, rewriter.getI64Type(), operand2);
-            operand2     = loadOp2.getResult();
-        }
-        // operand2.getType().dump();
+        Value result;
+        if (isa<FloatType>(dstType))
+            result = arith::AddFOp::create(rewriter, loc, op1, op2);
+        else
+            result = LLVM::AddOp::create(rewriter, loc, op1, op2);
 
-        auto addOp = LLVM::AddOp::create(rewriter, op.getLoc(), operand1, operand2);
-        // adaptor.getOperand1();
-        // auto addOp = LLVM::LoadOp::create(rewriter, op.getLoc(), rewriter.getI64Type(), adaptor.getOperands()[0]);
-        //
-        rewriter.replaceOp(op, addOp);
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
 
-        // rewriter.eraseOp(op);
+struct ConvertSubOp : public OpConversionPattern<mlir::starplat::SubOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::SubOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc     = op.getLoc();
+        auto dstType = op.getResult().getType();
+
+        Value op1    = loadIfPtr(rewriter, loc, adaptor.getOperands()[0], op.getOperands()[0].getType());
+        Value op2    = loadIfPtr(rewriter, loc, adaptor.getOperands()[1], op.getOperands()[1].getType());
+        op1          = castToType(rewriter, loc, op1, dstType);
+        op2          = castToType(rewriter, loc, op2, dstType);
+
+        Value result;
+        if (isa<FloatType>(dstType))
+            result = arith::SubFOp::create(rewriter, loc, op1, op2);
+        else
+            result = LLVM::SubOp::create(rewriter, loc, op1, op2);
+
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
+
+struct ConvertMulOp : public OpConversionPattern<mlir::starplat::MulOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::MulOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc     = op.getLoc();
+        auto dstType = op.getResult().getType();
+
+        Value op1    = loadIfPtr(rewriter, loc, adaptor.getOperands()[0], op.getOperands()[0].getType());
+        Value op2    = loadIfPtr(rewriter, loc, adaptor.getOperands()[1], op.getOperands()[1].getType());
+        op1          = castToType(rewriter, loc, op1, dstType);
+        op2          = castToType(rewriter, loc, op2, dstType);
+
+        Value result;
+        if (isa<FloatType>(dstType))
+            result = arith::MulFOp::create(rewriter, loc, op1, op2);
+        else
+            result = LLVM::MulOp::create(rewriter, loc, op1, op2);
+
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
+
+struct ConvertAndOp : public OpConversionPattern<mlir::starplat::AndOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::AndOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc = op.getLoc();
+        Value lhs = adaptor.getOperands()[0];
+        Value rhs = adaptor.getOperands()[1];
+        rewriter.replaceOp(op, arith::AndIOp::create(rewriter, loc, lhs, rhs));
+        return success();
+    }
+};
+
+struct ConvertDivOp : public OpConversionPattern<mlir::starplat::DivOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::DivOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc     = op.getLoc();
+        auto dstType = op.getResult().getType();
+
+        Value op1    = loadIfPtr(rewriter, loc, adaptor.getOperands()[0], op.getOperands()[0].getType());
+        Value op2    = loadIfPtr(rewriter, loc, adaptor.getOperands()[1], op.getOperands()[1].getType());
+        op1          = castToType(rewriter, loc, op1, dstType);
+        op2          = castToType(rewriter, loc, op2, dstType);
+
+        Value result;
+        if (isa<FloatType>(dstType))
+            result = arith::DivFOp::create(rewriter, loc, op1, op2);
+        else
+            result = arith::DivSIOp::create(rewriter, loc, op1, op2);
+
+        rewriter.replaceOp(op, result);
         return success();
     }
 };
@@ -1239,20 +1620,37 @@ struct ConvertSetNodePropOp : public OpConversionPattern<mlir::starplat::SetNode
         Value memref    = adaptor.getOperands()[2];
         Type elemTy     = cast<MemRefType>(memref.getType()).getElementType();
 
-        // Handle the i1 propNode -> memref<?xi8> widening case: the stored
-        // value is still i1, widen it to i8 before the store.
-        // For matching types (i64 -> memref<?xi64> etc.), store as-is.
+        // If the value was an SPFloatType or SPIntType variable it arrives as
+        // !llvm.ptr — load the scalar out of it first.
+        if (isa<LLVM::LLVMPointerType>(storedVal.getType())) {
+            Type loadTy = isa<starplat::SPFloatType>(op.getOperands()[3].getType()) ? (Type)rewriter.getF64Type() : (Type)rewriter.getI64Type();
+            storedVal   = LLVM::LoadOp::create(rewriter, loc, loadTy, storedVal).getResult();
+        }
+
         if (storedVal.getType() != elemTy) {
+            bool srcIsFloat = isa<FloatType>(storedVal.getType());
+            bool dstIsFloat = isa<FloatType>(elemTy);
+
             if (storedVal.getType().isInteger(1) && elemTy.isInteger(8)) {
                 storedVal = arith::ExtUIOp::create(rewriter, loc, elemTy, storedVal);
             }
+            else if (srcIsFloat && dstIsFloat) {
+                unsigned sw = cast<FloatType>(storedVal.getType()).getWidth();
+                unsigned dw = cast<FloatType>(elemTy).getWidth();
+                storedVal   = dw > sw ? (Value)arith::ExtFOp::create(rewriter, loc, elemTy, storedVal)
+                                      : (Value)arith::TruncFOp::create(rewriter, loc, elemTy, storedVal);
+            }
+            else if (!srcIsFloat && dstIsFloat) {
+                storedVal = arith::SIToFPOp::create(rewriter, loc, elemTy, storedVal);
+            }
+            else if (srcIsFloat && !dstIsFloat) {
+                storedVal = arith::FPToSIOp::create(rewriter, loc, elemTy, storedVal);
+            }
             else {
-                // Fall back to generic int ext/trunc for any other width mismatch.
                 auto vTy = dyn_cast<IntegerType>(storedVal.getType());
                 auto eTy = dyn_cast<IntegerType>(elemTy);
-                if (!vTy || !eTy) {
-                    return rewriter.notifyMatchFailure(op, "set-node-prop value / memref element type mismatch (non-integer)");
-                }
+                if (!vTy || !eTy)
+                    return rewriter.notifyMatchFailure(op, "set-node-prop value / memref element type mismatch");
                 if (vTy.getWidth() < eTy.getWidth())
                     storedVal = arith::ExtUIOp::create(rewriter, loc, elemTy, storedVal);
                 else
@@ -1286,19 +1684,19 @@ struct ConvertGetNodePropOp : public OpConversionPattern<mlir::starplat::GetNode
         Value idx = arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(), loadedIdxI32);
 
         // --- 2. Load propMemref[idx]. ---
-        Value loaded = memref::LoadOp::create(rewriter, loc, propMemref, ValueRange{idx});
+        Value loaded   = memref::LoadOp::create(rewriter, loc, propMemref, ValueRange{idx});
 
-        // If the starplat-level result type was i1 and the memref element type
-        // was widened to i8 by the type converter, narrow back via (!= 0).
-        // In every other case (i64 distance arrays, etc.) just return the
-        // loaded value directly — it already has the expected type.
         Type origResTy = op.getResult().getType();
         Type elemTy    = cast<MemRefType>(propMemref.getType()).getElementType();
         Value result   = loaded;
 
         if (origResTy.isInteger(1) && elemTy.isInteger(8)) {
+            // i8 widened by the type converter — narrow back via (!= 0).
             Value zeroI8 = arith::ConstantOp::create(rewriter, loc, rewriter.getI8Type(), rewriter.getI8IntegerAttr(0));
             result       = arith::CmpIOp::create(rewriter, loc, arith::CmpIPredicate::ne, loaded, zeroI8);
+        }
+        else if (loaded.getType() != origResTy) {
+            result = castToType(rewriter, loc, loaded, origResTy);
         }
 
         rewriter.replaceOp(op, result);
@@ -1357,6 +1755,26 @@ struct ConvertStoreOp : public OpConversionPattern<mlir::starplat::StoreOp>
             auto i64Ty  = rewriter.getI64Type();
             Value asI64 = arith::IndexCastOp::create(rewriter, loc, i64Ty, src);
             LLVM::StoreOp::create(rewriter, loc, asI64, dst);
+            rewriter.eraseOp(op);
+            return success();
+        }
+
+        // ── Case 4: dst is llvm.ptr (spfloat), src is a float ───────────────
+        // !starplat.spfloat lowered to !llvm.ptr (pointing at f64).
+        // Widen / narrow to f64 as needed, then store.
+        if (isa<LLVM::LLVMPointerType>(dstType) && isa<FloatType>(srcType)) {
+            auto f64Ty         = rewriter.getF64Type();
+            Value valueToStore = src;
+
+            if (srcType != f64Ty) {
+                unsigned srcWidth = cast<FloatType>(srcType).getWidth();
+                if (srcWidth < 64)
+                    valueToStore = arith::ExtFOp::create(rewriter, loc, f64Ty, src);
+                else
+                    valueToStore = arith::TruncFOp::create(rewriter, loc, f64Ty, src);
+            }
+
+            LLVM::StoreOp::create(rewriter, loc, valueToStore, dst);
             rewriter.eraseOp(op);
             return success();
         }
@@ -1576,8 +1994,46 @@ struct ConvertNumNodesOp : public OpConversionPattern<mlir::starplat::NumNodesOp
 {
     using OpConversionPattern<mlir::starplat::NumNodesOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(mlir::starplat::NumNodesOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter& rewriter) const override {
+    LogicalResult matchAndRewrite(mlir::starplat::NumNodesOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
+        auto loc                                  = op.getLoc();
+        auto ctx                                  = op.getContext();
+        auto module                               = op->getParentOfType<mlir::ModuleOp>();
+
+        auto ptrTy                                = LLVM::LLVMPointerType::get(ctx);
+        auto i32Ty                                = rewriter.getI32Type();
+
+        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn = LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
+        if (failed(getNumNodesFn))
+            return rewriter.notifyMatchFailure(op, "failed to declare get_num_nodes");
+
+        Value graphPtr  = adaptor.getOperands()[0];
+        Value nI32      = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
+
+        auto resultType = op.getResult().getType();
+        Value result;
+        if (resultType == i32Ty) {
+            result = nI32;
+        }
+        else if (auto intTy = dyn_cast<IntegerType>(resultType)) {
+            if (intTy.getWidth() > 32)
+                result = arith::ExtSIOp::create(rewriter, loc, resultType, nI32);
+            else
+                result = arith::TruncIOp::create(rewriter, loc, resultType, nI32);
+        }
+        else {
+            return rewriter.notifyMatchFailure(op, "unsupported num_nodes result type");
+        }
+
+        rewriter.replaceOp(op, result);
+        return success();
+    }
+};
+
+struct ConvertCountOutNbrsOp : public OpConversionPattern<mlir::starplat::CountOutNbrsOp>
+{
+    using OpConversionPattern<mlir::starplat::CountOutNbrsOp>::OpConversionPattern;
+
+    LogicalResult matchAndRewrite(mlir::starplat::CountOutNbrsOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
         auto loc    = op.getLoc();
         auto ctx    = op.getContext();
         auto module = op->getParentOfType<mlir::ModuleOp>();
@@ -1585,13 +2041,15 @@ struct ConvertNumNodesOp : public OpConversionPattern<mlir::starplat::NumNodesOp
         auto ptrTy = LLVM::LLVMPointerType::get(ctx);
         auto i32Ty = rewriter.getI32Type();
 
-        FailureOr<LLVM::LLVMFuncOp> getNumNodesFn =
-            LLVM::lookupOrCreateFn(rewriter, module, "get_num_nodes", {ptrTy}, i32Ty);
-        if (failed(getNumNodesFn))
-            return rewriter.notifyMatchFailure(op, "failed to declare get_num_nodes");
+        FailureOr<LLVM::LLVMFuncOp> getNumOutNbrsFn =
+            LLVM::lookupOrCreateFn(rewriter, module, "get_num_out_neighbours", {ptrTy, i32Ty}, i32Ty);
+        if (failed(getNumOutNbrsFn))
+            return rewriter.notifyMatchFailure(op, "failed to declare get_num_out_neighbours");
 
         Value graphPtr = adaptor.getOperands()[0];
-        Value nI32     = LLVM::CallOp::create(rewriter, loc, *getNumNodesFn, ValueRange{graphPtr}).getResult();
+        Value nodePtr  = adaptor.getOperands()[1];
+        Value nodeId   = LLVM::LoadOp::create(rewriter, loc, i32Ty, nodePtr);
+        Value nI32     = LLVM::CallOp::create(rewriter, loc, *getNumOutNbrsFn, ValueRange{graphPtr, nodeId}).getResult();
 
         auto resultType = op.getResult().getType();
         Value result;
@@ -1603,7 +2061,7 @@ struct ConvertNumNodesOp : public OpConversionPattern<mlir::starplat::NumNodesOp
             else
                 result = arith::TruncIOp::create(rewriter, loc, resultType, nI32);
         } else {
-            return rewriter.notifyMatchFailure(op, "unsupported num_nodes result type");
+            return rewriter.notifyMatchFailure(op, "unsupported count_outNbrs result type");
         }
 
         rewriter.replaceOp(op, result);
@@ -1615,8 +2073,7 @@ struct ConvertCastOp : public OpConversionPattern<mlir::starplat::CastOp>
 {
     using OpConversionPattern<mlir::starplat::CastOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(mlir::starplat::CastOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter& rewriter) const override {
+    LogicalResult matchAndRewrite(mlir::starplat::CastOp op, OpAdaptor adaptor, ConversionPatternRewriter& rewriter) const override {
         auto loc     = op.getLoc();
         Value input  = adaptor.getOperands()[0];
         auto srcType = input.getType();
@@ -1635,23 +2092,27 @@ struct ConvertCastOp : public OpConversionPattern<mlir::starplat::CastOp>
         Value result;
         if (srcIsInt && dstIsFloat) {
             result = arith::SIToFPOp::create(rewriter, loc, dstType, input);
-        } else if (srcIsFloat && dstIsInt) {
+        }
+        else if (srcIsFloat && dstIsInt) {
             result = arith::FPToSIOp::create(rewriter, loc, dstType, input);
-        } else if (srcIsInt && dstIsInt) {
+        }
+        else if (srcIsInt && dstIsInt) {
             unsigned srcW = cast<IntegerType>(srcType).getWidth();
             unsigned dstW = cast<IntegerType>(dstType).getWidth();
             if (dstW > srcW)
                 result = arith::ExtSIOp::create(rewriter, loc, dstType, input);
             else
                 result = arith::TruncIOp::create(rewriter, loc, dstType, input);
-        } else if (srcIsFloat && dstIsFloat) {
+        }
+        else if (srcIsFloat && dstIsFloat) {
             unsigned srcW = cast<FloatType>(srcType).getWidth();
             unsigned dstW = cast<FloatType>(dstType).getWidth();
             if (dstW > srcW)
                 result = arith::ExtFOp::create(rewriter, loc, dstType, input);
             else
                 result = arith::TruncFOp::create(rewriter, loc, dstType, input);
-        } else {
+        }
+        else {
             return rewriter.notifyMatchFailure(op, "unsupported cast type combination");
         }
 
@@ -1711,8 +2172,16 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         // target.addIllegalOp<mlir::starplat::ConstOp>();
         // target.addIllegalOp<mlir::starplat::AssignmentOp>();
         target.addIllegalOp<mlir::starplat::ForAllNodesOp>();
+        target.addIllegalOp<mlir::starplat::ForNodesToOp>();
+        target.addIllegalOp<mlir::starplat::StarPlatIfElseOp>();
+        target.addIllegalOp<mlir::starplat::DoWhileOp>();
         target.addIllegalOp<mlir::starplat::NumNodesOp>();
+        target.addIllegalOp<mlir::starplat::CountOutNbrsOp>();
         target.addIllegalOp<mlir::starplat::CastOp>();
+        target.addIllegalOp<mlir::starplat::DivOp>();
+        target.addIllegalOp<mlir::starplat::SubOp>();
+        target.addIllegalOp<mlir::starplat::MulOp>();
+        target.addIllegalOp<mlir::starplat::AndOp>();
 
         // target.addIllegalOp<mlir::starplat::SetNodePropertyOp>();
         // target.addIllegalOp<mlir::starplat::FixedPointUntilOp>();
@@ -1727,8 +2196,11 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         patterns.add<ConvertConstOp>(typeConverter, context);
         patterns.add<ConvertAssignOp>(context);
         patterns.add<ConvertIfOp>(typeConverter, context);
+        patterns.add<ConvertIfElseOp>(typeConverter, context);
+        patterns.add<ConvertDoWhileOp>(typeConverter, context);
         patterns.add<ForallNodesOpLoweringCPU>(typeConverter, context);
         patterns.add<ForAllNeighboursOpLoweringCPU>(typeConverter, context);
+        patterns.add<ForNodesToOpLoweringCPU>(typeConverter, context);
         patterns.add<ConvertNodeCmpOp>(typeConverter, context);
         patterns.add<ConvertIsEdgeOp>(typeConverter, context);
         patterns.add<ConvertAdd>(context);
@@ -1743,7 +2215,12 @@ struct ConvertStarPlatIRToBasePass : public mlir::starplat::impl::ConvertStarPla
         patterns.add<MinOpLowering>(typeConverter, context);
         patterns.add<ConvertReturnOp>(typeConverter, context);
         patterns.add<ConvertNumNodesOp>(typeConverter, context);
+        patterns.add<ConvertCountOutNbrsOp>(typeConverter, context);
         patterns.add<ConvertCastOp>(typeConverter, context);
+        patterns.add<ConvertDivOp>(context);
+        patterns.add<ConvertSubOp>(context);
+        patterns.add<ConvertMulOp>(context);
+        patterns.add<ConvertAndOp>(context);
 
         // populateFunctionOpInterfaceTypeConversionPattern<mlir::starplat::FuncOp>(patterns, typeConverter);
         // target.addDynamicallyLegalOp<mlir::starplat::FuncOp>([&](starplat::FuncOp op)

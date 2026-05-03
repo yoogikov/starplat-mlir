@@ -70,31 +70,36 @@ include_directories(
 
 # Add executable and link it with the parser library
 
-file(GLOB APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cc") # Track cocunut 🥸
-list(FILTER APP_SOURCES EXCLUDE REGEX ".*starplat-opt\\.cc$")
+add_library(app_lib STATIC
+    codegen/astdump.cpp
+    codegen/starplatIR.cpp
+    ast/ast.cpp
+    starplatDialect/libs/StarPlatDialect.cc
+    starplatDialect/libs/StarPlatTransforms.cc
+)
+add_dependencies(app_lib MLIRStarPlatIncGen)
 
-add_llvm_executable(app ${APP_SOURCES}  codegen/astdump.cpp codegen/starplatIR.cpp ast/ast.cpp starplatDialect/libs/StarPlatDialect.cc  starplatDialect/libs/StarPlatTransforms.cc
-        DEPENDS 
-          MLIRStarPlatIncGen  )
-
-
-target_link_libraries(app 
-    PRIVATE
-    parser_lib 
+target_link_libraries(app_lib
+    PUBLIC
+    parser_lib
     ${dialect_libs}
-    ${FLEX_LIBRARIES} 
-    ${BISON_LIBRARIES} 
+    ${FLEX_LIBRARIES}
+    ${BISON_LIBRARIES}
     ${extension_libs}
     ${translation_libs}
-      MLIRAnalysis
-          MLIRIR
-          MLIRParser
-          MLIRPass
-          MLIRTranslateLib
-	  MLIROpenMPToLLVM
-          MLIRSupport
-          MLIRSideEffectInterfaces
-          MLIRTransforms)
+    MLIRAnalysis
+    MLIRIR
+    MLIRParser
+    MLIRPass
+    MLIRTranslateLib
+    MLIROpenMPToLLVM
+    MLIRSupport
+    MLIRSideEffectInterfaces
+    MLIRTransforms)
+
+add_llvm_executable(app main.cc)
+
+target_link_libraries(app PRIVATE app_lib)
 add_llvm_executable(starplat-opt starplat-opt.cc starplatDialect/libs/StarPlatDialect.cc
     DEPENDS
       MLIRStarPlatIncGen)
